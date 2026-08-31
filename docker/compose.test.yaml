@@ -40,6 +40,23 @@ services:
       - "127.0.0.1:${DEV_CRAWL4AI_PORT:-11235}:11235"
 
   mcp:
+    # A name nothing publishes, and an explicit instruction to build it.
+    #
+    # Both halves are load-bearing. The base topology names the published image
+    # from versions.env, and Compose's default pull policy fetches a tag that
+    # exists in the registry rather than building the `build:` section below -
+    # so the contract tests spent their whole life exercising the last image
+    # that happened to be published instead of the code under test. It passed,
+    # because the published image passes the tests that existed when it was
+    # built. It only came apart once a change added tests for behaviour that
+    # image predates.
+    #
+    # `pull_policy: build` settles it. Renaming the image as well means a local
+    # run cannot quietly overwrite the published tag either: build it under the
+    # released name and a later deploy of that tag is no longer the thing that
+    # was released.
+    image: searxng-crawl4ai-mcp:contract-test
+    pull_policy: build
     build:
       context: ..
       dockerfile: Dockerfile

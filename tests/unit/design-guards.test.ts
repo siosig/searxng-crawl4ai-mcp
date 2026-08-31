@@ -134,3 +134,32 @@ test("both transports expose exactly the tools this server claims to have", asyn
     );
   }
 });
+
+test("the contract stack builds the code under test, and cannot pull instead", () => {
+  // This one is written from an actual failure rather than a worry. The test
+  // overlay has always carried a `build:` section, but the base topology names
+  // the published image from versions.env, and Compose's default pull policy
+  // fetches a tag that exists in the registry rather than building. So the
+  // gating contract tests exercised the last image that happened to be
+  // published - and passed, because that image passes the tests that existed
+  // when it was built. It only came apart when a change added tests for
+  // behaviour the published image predates.
+  //
+  // Two things have to hold, and neither is enough alone.
+  const overlay = read(join(ROOT, "docker/compose.test.yaml"));
+  const versions = read(join(ROOT, "versions.env"));
+
+  assert.match(
+    overlay,
+    /^\s*pull_policy:\s*build\s*$/m,
+    "docker/compose.test.yaml must tell Compose to build the mcp image, not fetch one",
+  );
+
+  const published = /^MCP_IMAGE=(.+)$/m.exec(versions)?.[1]?.trim();
+  assert.ok(published, "versions.env must name the published image");
+  assert.ok(
+    !overlay.includes(published),
+    "the contract stack must not build under the published tag; doing so overwrites it locally, " +
+      "and a later deploy of that tag stops being the thing that was released",
+  );
+});

@@ -177,8 +177,18 @@ export async function withRetry<T>(
     // Multiplies each wait by 1-2. Not full jitter, but enough that a fleet of
     // callers knocked over by the same upstream blip does not come back in step.
     randomize: true,
-    // A pending backoff must not be a reason for the process to stay up.
-    unref: true,
+    // `unref: true` is deliberately NOT set.
+    //
+    // It reads as tidy - why would a sleeping timer hold the process open? -
+    // but a backoff between attempts is the middle of a request someone is
+    // waiting on, not background housekeeping. Unreferenced, it is the only
+    // handle left whenever nothing else happens to be in flight, so the loop
+    // drains and the call is abandoned partway through. That surfaced first as
+    // ten retry tests being cancelled mid-flight on a CI runner, but the same
+    // shape would drop real work during a quiet moment or a shutdown.
+    //
+    // The graceful-shutdown paths in the transports are what bound how long a
+    // process lingers; a retry is work to be finished, not work to be skipped.
     shouldRetry: async (context): Promise<boolean> => {
       // Stage 1: side effects.
       //
