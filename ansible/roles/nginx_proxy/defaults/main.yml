@@ -1,0 +1,6 @@
+---
+nginx_proxy_conf_dir: /etc/nginx/conf.d
+nginx_proxy_location: /mcp-searxng-crawl4ai
+mcp_port: 3003
+# Long-running crawls hold the connection open; the default 60s would cut them.
+nginx_proxy_read_timeout: 600

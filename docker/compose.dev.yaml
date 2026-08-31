@@ -1,0 +1,24 @@
+# Development overlay. Never used on a deployed host.
+#
+#   docker compose --env-file versions.env --env-file .env \
+#     -f docker/compose.yaml -f docker/compose.dev.yaml up -d
+#
+# It does two things the production topology deliberately refuses: it builds the
+# MCP image locally instead of pulling a published one, and it publishes the
+# upstream containers on loopback so their HTTP contracts can be probed directly.
+
+services:
+  searxng:
+    ports:
+      - "127.0.0.1:${DEV_SEARXNG_PORT:-8081}:8080"
+
+  crawl4ai:
+    ports:
+      - "127.0.0.1:${DEV_CRAWL4AI_PORT:-11235}:11235"
+
+  mcp:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE}

@@ -1,0 +1,12 @@
+---
+- name: Install the MCP location block
+  ansible.builtin.template:
+    src: location.conf.j2
+    dest: "{{ nginx_proxy_conf_dir }}/mcp-searxng-crawl4ai.conf"
+    owner: root
+    group: root
+    mode: '0644'
+    validate: "nginx -t -c /etc/nginx/nginx.conf"
+  become: true
+  notify: Reload nginx
+  tags: [nginx_proxy, configure]

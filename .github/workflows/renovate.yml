@@ -1,0 +1,29 @@
+name: Renovate
+
+# Watches upstream for new releases and opens a pull request that changes only
+# versions.env. The contract tests then decide whether that release is safe.
+#
+# Renovate runs here rather than as a hosted app so the whole update mechanism
+# lives in this repository and needs no external installation.
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: renovatebot/github-action@v41
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_PLATFORM: github
+          LOG_LEVEL: info

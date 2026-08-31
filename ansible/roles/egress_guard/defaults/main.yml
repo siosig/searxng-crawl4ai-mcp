@@ -1,0 +1,18 @@
+---
+# The compose network the scraping containers sit on. Packets leaving this
+# subnet for a private destination are dropped.
+egress_guard_source_subnet: "172.18.0.0/16"
+
+# Destinations the scraper must never reach. This is the authoritative control:
+# the application-level check produces a clear error message, but it cannot
+# close the window between resolving a name and connecting to it.
+egress_guard_blocked_destinations:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+  - "169.254.0.0/16"
+  - "127.0.0.0/8"
+  - "100.64.0.0/10"
+
+# Exceptions, if the operator deliberately allows a device on the LAN.
+egress_guard_allowed_destinations: []

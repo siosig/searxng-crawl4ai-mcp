@@ -1,0 +1,20 @@
+---
+mcp_deploy_dir: /opt/searxng-crawl4ai-mcp
+mcp_port: 3003
+mcp_allowed_hosts: "localhost,127.0.0.1"
+
+# One browser per slot, so this is a memory and CPU budget rather than a
+# politeness limit. The default suits a developer machine; a low-power target
+# should override it downwards in host_vars rather than discovering the limit
+# by running out of memory.
+mcp_max_concurrent_fetches: 2
+
+mcp_log_level: info
+mcp_gemini_model: "gemini/gemini-flash-lite-latest"
+
+# Extra CIDR ranges the scraper may reach. Empty by default: private,
+# loopback, link-local and metadata ranges stay refused.
+mcp_scrape_allow_cidrs: ""
+
+# Path to the local .env holding the Gemini key, relative to the playbook.
+mcp_local_env_file: "{{ playbook_dir }}/../.env"

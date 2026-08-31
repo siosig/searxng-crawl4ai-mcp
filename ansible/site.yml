@@ -1,0 +1,30 @@
+---
+- name: Deploy the SearXNG and Crawl4AI MCP stack
+  hosts: mcp_hosts
+  gather_facts: true
+
+  pre_tasks:
+    - name: Confirm the required secrets are present
+      ansible.builtin.assert:
+        that:
+          - vault_mcp_auth_token | default('') | length >= 16
+          - vault_searxng_secret | default('') | length >= 16
+          - vault_crawl4ai_api_token | default('') | length >= 16
+        fail_msg: >-
+          Missing credentials in host_vars/<host>/vault.yml. CRAWL4AI_API_TOKEN
+          is not optional: without it Crawl4AI binds to loopback inside its own
+          container and the stack cannot talk to it.
+      tags: [always]
+
+  roles:
+    - role: mcp_stack
+    - role: egress_guard
+    - role: nginx_proxy
+
+  post_tasks:
+    - name: Report where the stack is reachable
+      ansible.builtin.debug:
+        msg: >-
+          MCP stack is up on port {{ mcp_port }} (loopback), proxied at
+          {{ nginx_proxy_location }}.
+      tags: [always]

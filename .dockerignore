@@ -1,0 +1,27 @@
+# Keep the build context small and free of anything environment-specific.
+.git
+.github
+node_modules
+dist
+*.tsbuildinfo
+
+# Secrets and local-only configuration must never enter an image layer.
+.env
+.env.*
+!.env.example
+.secretlintrc.local.json
+
+# Deployment inventory names real hosts.
+ansible
+
+# Design documents are not part of the runtime image.
+specs
+.specify
+.claude
+CLAUDE.md
+docs
+
+# Test fixtures and local scratch.
+tests
+tmp
+logs

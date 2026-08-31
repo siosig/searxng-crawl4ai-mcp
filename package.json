@@ -1,0 +1,44 @@
+{
+  "name": "searxng-crawl4ai-mcp-server",
+  "version": "0.1.0",
+  "description": "Self-hosted MCP server exposing web search and page fetching, built as a thin layer over the official SearXNG and Crawl4AI HTTP APIs.",
+  "type": "module",
+  "main": "dist/index.js",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "tsx --test \"tests/unit/**/*.test.ts\"",
+    "test:contract:tier-a": "tsx --test \"tests/contract/tier-a/**/*.test.ts\"",
+    "test:contract:tier-b": "tsx --test \"tests/contract/tier-b/**/*.test.ts\""
+  },
+  "keywords": [
+    "mcp",
+    "searxng",
+    "crawl4ai",
+    "self-hosted",
+    "web-search"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "ipaddr.js": "^2.5.0",
+    "pino": "^10.3.1",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.1",
+    "eslint": "^10.9.1",
+    "tsx": "^4.23.13",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.68.0"
+  }
+}

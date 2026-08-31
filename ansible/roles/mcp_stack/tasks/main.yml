@@ -1,0 +1,118 @@
+---
+- name: Ensure the deployment directory exists
+  ansible.builtin.file:
+    path: "{{ mcp_deploy_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+  become: true
+  tags: [mcp_stack, configure]
+
+- name: Ensure the SearXNG configuration directory exists
+  ansible.builtin.file:
+    path: "{{ mcp_deploy_dir }}/searxng"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+  become: true
+  tags: [mcp_stack, configure]
+
+- name: Copy the compose definition
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../docker/compose.yaml"
+    dest: "{{ mcp_deploy_dir }}/compose.yaml"
+    owner: root
+    group: root
+    mode: '0640'
+  become: true
+  notify: Restart the MCP stack
+  tags: [mcp_stack, configure]
+
+- name: Copy the SearXNG settings
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../docker/searxng/settings.yml"
+    dest: "{{ mcp_deploy_dir }}/searxng/settings.yml"
+    owner: root
+    group: root
+    mode: '0640'
+  become: true
+  notify: Restart the MCP stack
+  tags: [mcp_stack, configure]
+
+- name: Copy the pinned upstream versions
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../versions.env"
+    dest: "{{ mcp_deploy_dir }}/versions.env"
+    owner: root
+    group: root
+    mode: '0640'
+  become: true
+  notify: Restart the MCP stack
+  tags: [mcp_stack, configure]
+
+# The Gemini key lives in the repository-root .env, which is gitignored. Reading
+# it here keeps the operator from having to maintain the same secret twice.
+- name: Read the Gemini API key from the local .env
+  ansible.builtin.set_fact:
+    mcp_gemini_api_key: >-
+      {{ lookup('ansible.builtin.ini', 'GEMINI_API_KEY',
+                file=mcp_local_env_file, type='properties', errors='ignore') | default('', true) }}
+  no_log: true
+  tags: [mcp_stack, configure]
+
+- name: Write the environment file
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ mcp_deploy_dir }}/.env"
+    owner: root
+    group: root
+    mode: '0600'
+  become: true
+  no_log: true
+  notify: Restart the MCP stack
+  tags: [mcp_stack, configure]
+
+# Pull, never build. The target is a low-power machine and building on it is
+# the single most expensive thing a deployment could do.
+- name: Pull the pinned images
+  ansible.builtin.command:
+    cmd: >-
+      docker compose --env-file versions.env --env-file .env
+      -f compose.yaml pull --quiet
+    chdir: "{{ mcp_deploy_dir }}"
+  become: true
+  register: mcp_pull
+  changed_when: false
+  tags: [mcp_stack, deploy]
+
+- name: Bring the stack up
+  ansible.builtin.command:
+    cmd: >-
+      docker compose --env-file versions.env --env-file .env
+      -f compose.yaml up -d --remove-orphans --wait --wait-timeout 300
+    chdir: "{{ mcp_deploy_dir }}"
+  become: true
+  register: mcp_up
+  changed_when: "'Started' in mcp_up.stderr or 'Recreated' in mcp_up.stderr"
+  tags: [mcp_stack, deploy]
+
+- name: Confirm the server answers
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mcp_port }}/"
+    status_code: 200
+  retries: 10
+  delay: 3
+  register: mcp_health
+  until: mcp_health.status == 200
+  tags: [mcp_stack, deploy]
+
+- name: Confirm an unauthenticated tool call is refused
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mcp_port }}/mcp"
+    method: POST
+    body_format: json
+    body: {}
+    status_code: 401
+  tags: [mcp_stack, deploy, verify]

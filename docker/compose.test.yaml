@@ -1,0 +1,58 @@
+# Overlay for the contract tests.
+#
+# Adds a fixture origin inside the compose network so Tier A can prove the
+# upstream contract without depending on the public internet - a datacenter IP
+# being served a CAPTCHA says nothing about whether this code works.
+#
+# Two settings here exist only because the fixture lives on a private address,
+# and both are deliberately absent from the production topology:
+#
+#   * CRAWL4AI_ALLOW_INTERNAL_URLS switches off Crawl4AI's own refusal to fetch
+#     internal addresses.
+#   * SCRAPE_ALLOW_CIDRS widens this server's outbound policy.
+#
+# The allow-list is pinned to the fixture's subnet alone, not to "private
+# addresses" in general, so the tests that assert private targets are refused
+# still have ranges left to be refused with.
+
+services:
+  fixture-site:
+    image: ${NGINX_IMAGE}
+    volumes:
+      - ../tests/fixtures/site:/usr/share/nginx/html:ro
+    networks:
+      stack:
+        ipv4_address: 172.28.5.10
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/index.html"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  searxng:
+    ports:
+      - "127.0.0.1:${DEV_SEARXNG_PORT:-8081}:8080"
+
+  crawl4ai:
+    environment:
+      CRAWL4AI_ALLOW_INTERNAL_URLS: "true"
+    ports:
+      - "127.0.0.1:${DEV_CRAWL4AI_PORT:-11235}:11235"
+
+  mcp:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE}
+    environment:
+      SCRAPE_ALLOW_CIDRS: 172.28.5.0/24
+    depends_on:
+      fixture-site:
+        condition: service_healthy
+
+networks:
+  stack:
+    ipam:
+      config:
+        - subnet: 172.28.5.0/24

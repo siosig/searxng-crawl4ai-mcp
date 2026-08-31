@@ -1,0 +1,37 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Asia/Tokyo",
+  "schedule": ["before 6am on monday"],
+  "labels": ["upstream-update"],
+  "prConcurrentLimit": 3,
+
+  "//": "No automerge, anywhere. The contract tests say whether a release works; a human still decides whether to deploy it.",
+  "automerge": false,
+
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Upstream container images, declared only in versions.env",
+      "managerFilePatterns": ["/^versions\\.env$/"],
+      "matchStrings": [
+        "(?<depName>[a-z0-9._/-]+):(?<currentValue>[A-Za-z0-9._-]+)\\s*$"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+
+  "packageRules": [
+    {
+      "description": "Group the two upstream services so their compatibility is tested together.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["searxng/searxng", "unclecode/crawl4ai"],
+      "groupName": "upstream services"
+    },
+    {
+      "description": "Our own image is set by the build workflow, not by Renovate.",
+      "matchPackageNames": ["/^ghcr\\.io\\//"],
+      "enabled": false
+    }
+  ]
+}

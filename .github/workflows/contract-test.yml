@@ -1,0 +1,144 @@
+name: Contract tests
+
+# Runs the real stack and exercises every tool against it. This is the gate an
+# upstream version bump has to pass before anyone considers deploying it: the
+# point of the project is to follow upstream releases, and that is only safe if
+# a broken release is caught here rather than on the running host.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: Types, lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      # Includes the design guards: upstream versions declared in one place,
+      # no calls into the scraping library's internals, no HTTP outside
+      # src/upstream, nothing built on the target host.
+      - run: pnpm test
+
+  tier-a:
+    name: Tier A - upstream contract (gating)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate throwaway credentials
+        run: |
+          {
+            echo "MCP_AUTH_TOKEN=$(openssl rand -hex 32)"
+            echo "SEARXNG_SECRET=$(openssl rand -hex 32)"
+            echo "CRAWL4AI_API_TOKEN=$(openssl rand -hex 32)"
+            echo "MCP_ALLOWED_HOSTS=localhost,127.0.0.1"
+            echo "MCP_PORT=3003"
+          } > .env
+
+      - name: Start the stack
+        run: |
+          set -a; . ./.env; set +a
+          docker compose --env-file versions.env --env-file .env \
+            -f docker/compose.yaml -f docker/compose.test.yaml up -d --wait --wait-timeout 300
+
+      - name: Run Tier A
+        env:
+          MCP_ENDPOINT: http://127.0.0.1:3003/mcp
+          FIXTURE_ORIGIN: http://fixture-site
+          FIXTURE_PROBE: http://fixture-site/index.html
+          SEARXNG_PROBE_URL: http://127.0.0.1:8081
+          CRAWL4AI_PROBE_URL: http://127.0.0.1:11235
+        run: |
+          set -a; . ./.env; set +a
+          pnpm test:contract:tier-a
+
+      - name: Verify the stack still works with no model credentials
+        env:
+          MCP_ENDPOINT: http://127.0.0.1:3003/mcp
+          FIXTURE_ORIGIN: http://fixture-site
+          DEGRADED_RUN: "1"
+        run: |
+          set -a; . ./.env; set +a
+          GEMINI_API_KEY= docker compose --env-file versions.env --env-file .env \
+            -f docker/compose.yaml -f docker/compose.test.yaml up -d --force-recreate --wait --wait-timeout 180 mcp
+          pnpm exec tsx --test "tests/contract/tier-a/degraded.test.ts"
+
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          docker compose --env-file versions.env --env-file .env \
+            -f docker/compose.yaml -f docker/compose.test.yaml logs --tail 200
+
+      - name: Tear down
+        if: always()
+        run: |
+          docker compose --env-file versions.env --env-file .env \
+            -f docker/compose.yaml -f docker/compose.test.yaml down -v || true
+
+  tier-b:
+    name: Tier B - live internet (reported, not gating)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # A hosted runner's address is regularly served a CAPTCHA by search engines.
+    # That says something about where CI runs, not about whether this code is
+    # correct, so it must never block an upstream update.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate throwaway credentials
+        run: |
+          {
+            echo "MCP_AUTH_TOKEN=$(openssl rand -hex 32)"
+            echo "SEARXNG_SECRET=$(openssl rand -hex 32)"
+            echo "CRAWL4AI_API_TOKEN=$(openssl rand -hex 32)"
+            echo "MCP_ALLOWED_HOSTS=localhost,127.0.0.1"
+            echo "MCP_PORT=3003"
+            echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"
+          } > .env
+
+      - name: Start the stack
+        run: |
+          set -a; . ./.env; set +a
+          docker compose --env-file versions.env --env-file .env \
+            -f docker/compose.yaml -f docker/compose.test.yaml up -d --wait --wait-timeout 300
+
+      - name: Run Tier B
+        env:
+          MCP_ENDPOINT: http://127.0.0.1:3003/mcp
+        run: |
+          set -a; . ./.env; set +a
+          pnpm test:contract:tier-b
+
+      - name: Tear down
+        if: always()
+        run: |
+          docker compose --env-file versions.env --env-file .env \
+            -f docker/compose.yaml -f docker/compose.test.yaml down -v || true

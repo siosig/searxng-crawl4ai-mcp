@@ -1,0 +1,49 @@
+name: Build and publish image
+
+# The target host is a low-power machine, so it must never build. CI produces
+# the image, publishes it, and the deployment only pulls.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "specs/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the pinned base image
+        run: grep '^NODE_IMAGE=' versions.env >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # The commit sha is the tag, so a deployed image maps to exactly one
+          # revision and a rollback is just an older sha. No moving tags.
+          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          build-args: NODE_IMAGE=${{ env.NODE_IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: How to deploy this image
+        run: |
+          echo "Set MCP_IMAGE in versions.env to:"
+          echo "  ghcr.io/${{ github.repository }}:${{ github.sha }}"
+          echo "then run the Ansible playbook."

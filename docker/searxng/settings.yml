@@ -1,0 +1,24 @@
+# Deliberately tiny.
+#
+# `use_default_settings` inherits everything SearXNG ships with, so engine
+# definitions, categories and defaults keep following upstream instead of being
+# frozen here. Only settings that cannot be expressed another way belong below;
+# anything added here is a thing that stops tracking upstream.
+use_default_settings: true
+
+server:
+  # SEARXNG_SECRET is substituted from the environment at deploy time.
+  secret_key: "${SEARXNG_SECRET}"
+  # The bot limiter exists to protect a public instance. This one is only
+  # reachable from inside the compose network, and the limiter would reject
+  # our own API calls.
+  limiter: false
+  public_instance: false
+
+search:
+  # The single setting that forces this file to exist: `formats` defaults to
+  # [html] and has no environment-variable override, so without this line
+  # `format=json` is answered with 403 Forbidden.
+  formats:
+    - html
+    - json

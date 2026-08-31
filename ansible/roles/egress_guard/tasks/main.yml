@@ -1,0 +1,60 @@
+---
+# Blocks the scraping containers from reaching the local network.
+#
+# This is the layer that actually holds. The check inside the MCP server
+# resolves a hostname and refuses private addresses, which gives the caller a
+# precise error - but a name can resolve differently a moment later, and no
+# application-level check closes that window. A packet filter does.
+#
+# Rules go in DOCKER-USER because Docker consults it before its own rules and
+# does not flush it on restart.
+
+- name: Ensure iptables is present
+  ansible.builtin.package:
+    name: iptables
+    state: present
+  become: true
+  tags: [egress_guard, security]
+
+- name: Allow the deliberately permitted destinations first
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    source: "{{ egress_guard_source_subnet }}"
+    destination: "{{ item }}"
+    jump: RETURN
+    action: insert
+    comment: "mcp-stack: operator-allowed destination"
+    state: present
+  loop: "{{ egress_guard_allowed_destinations }}"
+  become: true
+  tags: [egress_guard, security]
+
+- name: Drop traffic from the stack to private destinations
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    source: "{{ egress_guard_source_subnet }}"
+    destination: "{{ item }}"
+    jump: DROP
+    action: append
+    comment: "mcp-stack: no reaching the local network"
+    state: present
+  loop: "{{ egress_guard_blocked_destinations }}"
+  become: true
+  tags: [egress_guard, security]
+
+- name: Persist the rules across reboots
+  ansible.builtin.package:
+    name: iptables-persistent
+    state: present
+  become: true
+  when: ansible_os_family == "Debian"
+  tags: [egress_guard, security]
+
+- name: Save the rules
+  ansible.builtin.command:
+    cmd: netfilter-persistent save
+  become: true
+  when: ansible_os_family == "Debian"
+  register: egress_save
+  changed_when: false
+  tags: [egress_guard, security]

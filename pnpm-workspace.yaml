@@ -1,0 +1,8 @@
+# Not a monorepo. pnpm 10+ reads several settings from this file rather than
+# from package.json, so it exists purely to carry them.
+#
+# esbuild ships a platform binary and needs its install script to run, so tsx
+# (the dev and test runner) is unusable without it. `allowBuilds` is what pnpm
+# actually honours; it is written by `pnpm approve-builds`.
+allowBuilds:
+  esbuild: true

@@ -1,0 +1,10 @@
+# Copy to hosts.yml and fill in. hosts.yml is gitignored, as is host_vars/,
+# because both name a real machine.
+---
+all:
+  children:
+    mcp_hosts:
+      hosts:
+        my-server:
+          ansible_host: server.example.internal
+          ansible_user: deploy

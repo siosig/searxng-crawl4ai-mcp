@@ -1,0 +1,99 @@
+# Production topology: three containers, no build steps, no database.
+#
+# Image tags come from versions.env, which is the only place they are declared.
+# Bring the stack up with both env files:
+#
+#   docker compose --env-file versions.env --env-file .env -f docker/compose.yaml up -d
+
+name: searxng-crawl4ai-mcp
+
+services:
+  searxng:
+    image: ${SEARXNG_IMAGE}
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?SEARXNG_SECRET is required}
+      SEARXNG_BASE_URL: http://searxng:8080/
+      SEARXNG_LIMITER: "false"
+      # The relay belongs to the containers that reach the public internet.
+      # The MCP server only talks to these two over the compose network and
+      # must not route that traffic through it.
+      HTTP_PROXY: ${PROXY_URL:-}
+      HTTPS_PROXY: ${PROXY_URL:-}
+      NO_PROXY: localhost,127.0.0.1,searxng,crawl4ai,mcp
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    # No host port. Nothing outside the compose network talks to SearXNG.
+    networks: [stack]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID, DAC_OVERRIDE]
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  crawl4ai:
+    image: ${CRAWL4AI_IMAGE}
+    restart: unless-stopped
+    environment:
+      # Required, and not only as a credential. Crawl4AI binds gunicorn to
+      # 127.0.0.1 unless a token is present, so without this the container is
+      # healthy from the inside and unreachable from every other container on
+      # the network. Setting it switches the bind to [::] and turns on
+      # `Authorization: Bearer` on every route.
+      CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:?CRAWL4AI_API_TOKEN is required}
+      # Optional. With no key, /llm is unavailable and web_extract degrades to
+      # returning page markdown; every other tool is unaffected.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Crawl4AI ships with `openai/gpt-4o-mini` as its default provider, and it
+      # only accepts request-level providers from the same family - so without
+      # this override /llm asks LiteLLM for an OPENAI_API_KEY and fails with a
+      # 500 even though a Gemini key is present. LLM_PROVIDER is the documented
+      # environment override, which avoids mounting a whole config.yml.
+      LLM_PROVIDER: ${GEMINI_MODEL:-gemini/gemini-flash-lite-latest}
+      # Honoured by the browser when set; empty means connect directly.
+      HTTP_PROXY: ${PROXY_URL:-}
+      HTTPS_PROXY: ${PROXY_URL:-}
+      NO_PROXY: localhost,127.0.0.1,searxng,crawl4ai,mcp
+    # Chromium needs more shared memory than Docker's 64MB default; without
+    # this it crashes on content-heavy pages.
+    shm_size: 1gb
+    networks: [stack]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,urllib.request;r=urllib.request.Request('http://localhost:11235/health',headers={'Authorization':'Bearer '+os.environ['CRAWL4AI_API_TOKEN']});urllib.request.urlopen(r).read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  mcp:
+    image: ${MCP_IMAGE}
+    restart: unless-stopped
+    environment:
+      SEARXNG_URL: http://searxng:8080
+      CRAWL4AI_URL: http://crawl4ai:11235
+      CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:?CRAWL4AI_API_TOKEN is required}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:?MCP_ALLOWED_HOSTS is required}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
+      PROXY_URL: ${PROXY_URL:-}
+      SCRAPE_ALLOW_CIDRS: ${SCRAPE_ALLOW_CIDRS:-}
+      MAX_CONCURRENT_FETCHES: ${MAX_CONCURRENT_FETCHES:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PORT: "3000"
+    ports:
+      # Loopback only. A reverse proxy in front of this is what faces the world.
+      - "127.0.0.1:${MCP_PORT:-3003}:3000"
+    depends_on:
+      searxng:
+        condition: service_healthy
+      crawl4ai:
+        condition: service_healthy
+    networks: [stack]
+
+networks:
+  stack:
+    driver: bridge
