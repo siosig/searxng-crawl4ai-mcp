@@ -24,7 +24,14 @@ services:
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     # No host port. Nothing outside the compose network talks to SearXNG.
-    networks: [stack]
+    #
+    # The alias is declared rather than left implicit: recent Compose registers
+    # the service name as a DNS alias by itself, older builds do not, and the
+    # failure that produces is an ENOTFOUND deep inside a tool call rather than
+    # anything that looks like a networking problem.
+    networks:
+      stack:
+        aliases: [searxng]
     cap_drop: [ALL]
     cap_add: [CHOWN, SETGID, SETUID, DAC_OVERRIDE]
     healthcheck:
@@ -60,7 +67,9 @@ services:
     # Chromium needs more shared memory than Docker's 64MB default; without
     # this it crashes on content-heavy pages.
     shm_size: 1gb
-    networks: [stack]
+    networks:
+      stack:
+        aliases: [crawl4ai]
     healthcheck:
       test: ["CMD", "python", "-c", "import os,urllib.request;r=urllib.request.Request('http://localhost:11235/health',headers={'Authorization':'Bearer '+os.environ['CRAWL4AI_API_TOKEN']});urllib.request.urlopen(r).read()"]
       interval: 30s
@@ -92,8 +101,17 @@ services:
         condition: service_healthy
       crawl4ai:
         condition: service_healthy
-    networks: [stack]
+    networks:
+      stack:
+        aliases: [mcp]
 
 networks:
   stack:
     driver: bridge
+    ipam:
+      config:
+        # Pinned rather than auto-assigned. The deployment installs a packet
+        # filter that blocks this subnet from reaching the local network, and a
+        # subnet Docker picks on the fly would not match it - leaving a rule
+        # that looks like a control and silently blocks nothing.
+        - subnet: ${STACK_SUBNET:-172.28.6.0/24}

@@ -1,12 +1,84 @@
 ---
+- name: Confirm the locations directory exists
+  ansible.builtin.stat:
+    path: "{{ nginx_proxy_locations_dir }}"
+  register: nginx_locations_dir
+  become: true
+  tags: [nginx_proxy, configure]
+
+- name: Fail early when the site does not use an includes directory
+  ansible.builtin.assert:
+    that: nginx_locations_dir.stat.isdir | default(false)
+    fail_msg: >-
+      {{ nginx_proxy_locations_dir }} does not exist. A `location` block is only
+      valid inside a `server`, so this role needs a directory the site's server
+      block includes. Create it and add
+      `include {{ nginx_proxy_locations_dir }}/*.conf;` inside the server block,
+      or point nginx_proxy_locations_dir at the directory you already use.
+  tags: [nginx_proxy, configure]
+
+# A location snippet cannot be checked on its own - it is only valid inside a
+# server block - so `validate:` on the template has nothing useful to test.
+# Instead: write it, check the assembled configuration, and put the previous
+# state back if nginx refuses it. A broken snippet here would take down every
+# site on the host, not just this one.
+#
+# The checks below are inline rather than handlers on purpose: a handler runs at
+# the end of the play, long after a rejected snippet could have been left in
+# place. Hence the no-handler suppressions.
 - name: Install the MCP location block
   ansible.builtin.template:
     src: location.conf.j2
-    dest: "{{ nginx_proxy_conf_dir }}/mcp-searxng-crawl4ai.conf"
+    dest: "{{ nginx_proxy_locations_dir }}/{{ nginx_proxy_conf_name }}"
     owner: root
     group: root
     mode: '0644'
-    validate: "nginx -t -c /etc/nginx/nginx.conf"
+    backup: true
   become: true
+  register: nginx_location
   notify: Reload nginx
+  tags: [nginx_proxy, configure]
+
+- name: Check the assembled nginx configuration  # noqa: no-handler
+  ansible.builtin.command:
+    cmd: nginx -t
+  become: true
+  register: nginx_syntax
+  changed_when: false
+  failed_when: false
+  when: nginx_location.changed
+  tags: [nginx_proxy, configure]
+
+- name: Restore the previous block when nginx rejects it  # noqa: no-handler
+  ansible.builtin.copy:
+    src: "{{ nginx_location.backup_file }}"
+    dest: "{{ nginx_proxy_locations_dir }}/{{ nginx_proxy_conf_name }}"
+    remote_src: true
+    mode: '0644'
+  become: true
+  when:
+    - nginx_location.changed
+    - nginx_syntax.rc | default(0) != 0
+    - nginx_location.backup_file is defined
+  tags: [nginx_proxy, configure]
+
+- name: Remove the new block when rejected and there was none before  # noqa: no-handler
+  ansible.builtin.file:
+    path: "{{ nginx_proxy_locations_dir }}/{{ nginx_proxy_conf_name }}"
+    state: absent
+  become: true
+  when:
+    - nginx_location.changed
+    - nginx_syntax.rc | default(0) != 0
+    - nginx_location.backup_file is not defined
+  tags: [nginx_proxy, configure]
+
+- name: Stop if nginx rejected the configuration  # noqa: no-handler
+  ansible.builtin.fail:
+    msg: >-
+      nginx rejected the configuration and the previous state has been restored:
+      {{ nginx_syntax.stderr | default('no output') }}
+  when:
+    - nginx_location.changed
+    - nginx_syntax.rc | default(0) != 0
   tags: [nginx_proxy, configure]

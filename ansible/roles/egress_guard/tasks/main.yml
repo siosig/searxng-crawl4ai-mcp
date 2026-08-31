@@ -16,6 +16,62 @@
   become: true
   tags: [egress_guard, security]
 
+- name: Take the stack subnet from versions.env
+  ansible.builtin.set_fact:
+    egress_guard_source_subnet: >-
+      {{ lookup('ansible.builtin.ini', 'STACK_SUBNET',
+                file=mcp_local_env_file | dirname + '/versions.env',
+                type='properties', errors='ignore')
+         | default(egress_guard_source_subnet, true) }}
+  tags: [egress_guard, security]
+
+- name: Confirm the DOCKER-USER chain exists
+  ansible.builtin.command:
+    cmd: iptables -t filter -L DOCKER-USER -n
+  become: true
+  register: docker_user_chain
+  changed_when: false
+  failed_when: false
+  tags: [egress_guard, security]
+
+- name: Fail when Docker has not created its hook chain
+  ansible.builtin.assert:
+    that: docker_user_chain.rc == 0
+    fail_msg: >-
+      The DOCKER-USER chain does not exist, so there is nowhere to install the
+      egress rules. Docker creates it when it manages iptables; check that
+      iptables handling is not disabled in /etc/docker/daemon.json.
+  tags: [egress_guard, security]
+
+# xt_comment is not present on every kernel - it is missing on some minimal
+# server builds - and iptables reports its absence as a confusing
+# "No such file or directory" against the chain. Detect it once rather than
+# letting a label decide whether the firewall gets configured at all.
+- name: Check whether iptables can label rules
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      iptables -t filter -N MCP_COMMENT_PROBE 2>/dev/null || true
+      rc=0
+      iptables -t filter -A MCP_COMMENT_PROBE -j RETURN -m comment --comment probe 2>/dev/null || rc=$?
+      iptables -t filter -F MCP_COMMENT_PROBE 2>/dev/null || true
+      iptables -t filter -X MCP_COMMENT_PROBE 2>/dev/null || true
+      exit $rc
+  become: true
+  register: comment_supported
+  changed_when: false
+  failed_when: false
+  tags: [egress_guard, security]
+
+- name: Note that rules will be unlabelled on this kernel
+  ansible.builtin.debug:
+    msg: >-
+      This kernel has no xt_comment module, so the egress rules are installed
+      without a comment. They are still enforced; they are simply harder to
+      recognise in `iptables -S DOCKER-USER`.
+  when: comment_supported.rc != 0
+  tags: [egress_guard, security]
+
 - name: Allow the deliberately permitted destinations first
   ansible.builtin.iptables:
     chain: DOCKER-USER
@@ -23,7 +79,7 @@
     destination: "{{ item }}"
     jump: RETURN
     action: insert
-    comment: "mcp-stack: operator-allowed destination"
+    comment: "{{ (egress_guard_comment ~ ' (allowed)') if comment_supported.rc == 0 else omit }}"
     state: present
   loop: "{{ egress_guard_allowed_destinations }}"
   become: true
@@ -36,7 +92,7 @@
     destination: "{{ item }}"
     jump: DROP
     action: append
-    comment: "mcp-stack: no reaching the local network"
+    comment: "{{ egress_guard_comment if comment_supported.rc == 0 else omit }}"
     state: present
   loop: "{{ egress_guard_blocked_destinations }}"
   become: true
@@ -54,7 +110,7 @@
   ansible.builtin.command:
     cmd: netfilter-persistent save
   become: true
-  when: ansible_os_family == "Debian"
   register: egress_save
   changed_when: false
+  when: ansible_os_family == "Debian" and not ansible_check_mode
   tags: [egress_guard, security]

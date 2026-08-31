@@ -74,6 +74,11 @@
   notify: Restart the MCP stack
   tags: [mcp_stack, configure]
 
+# The remaining tasks act on the host rather than describing it, so a dry run
+# reports them instead of pretending to run them. Without this, `--check` fails
+# on the first docker command because the directory it would run in was only
+# ever going to be created for real.
+
 # Pull, never build. The target is a low-power machine and building on it is
 # the single most expensive thing a deployment could do.
 - name: Pull the pinned images
@@ -85,6 +90,7 @@
   become: true
   register: mcp_pull
   changed_when: false
+  when: not ansible_check_mode
   tags: [mcp_stack, deploy]
 
 - name: Bring the stack up
@@ -96,6 +102,7 @@
   become: true
   register: mcp_up
   changed_when: "'Started' in mcp_up.stderr or 'Recreated' in mcp_up.stderr"
+  when: not ansible_check_mode
   tags: [mcp_stack, deploy]
 
 - name: Confirm the server answers
@@ -106,6 +113,7 @@
   delay: 3
   register: mcp_health
   until: mcp_health.status == 200
+  when: not ansible_check_mode
   tags: [mcp_stack, deploy]
 
 - name: Confirm an unauthenticated tool call is refused
@@ -115,4 +123,5 @@
     body_format: json
     body: {}
     status_code: 401
+  when: not ansible_check_mode
   tags: [mcp_stack, deploy, verify]

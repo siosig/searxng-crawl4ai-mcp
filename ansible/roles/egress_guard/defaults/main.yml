@@ -1,10 +1,11 @@
 ---
-# The compose network the scraping containers sit on. Packets leaving this
-# subnet for a private destination are dropped.
-egress_guard_source_subnet: "172.18.0.0/16"
+# The stack's private network, read from versions.env by the playbook so the
+# filter and the network cannot drift apart. Overriding it here would defeat
+# the point; change STACK_SUBNET instead.
+egress_guard_source_subnet: "172.28.6.0/24"
 
 # Destinations the scraper must never reach. This is the authoritative control:
-# the application-level check produces a clear error message, but it cannot
+# the check inside the MCP server produces a clear error message, but it cannot
 # close the window between resolving a name and connecting to it.
 egress_guard_blocked_destinations:
   - "10.0.0.0/8"
@@ -16,3 +17,8 @@ egress_guard_blocked_destinations:
 
 # Exceptions, if the operator deliberately allows a device on the LAN.
 egress_guard_allowed_destinations: []
+
+# Rules are labelled with an iptables comment where the kernel supports it.
+# Some kernels ship without xt_comment, and a security control must not depend
+# on an optional module, so support is detected and the label simply omitted.
+egress_guard_comment: "mcp-stack: no reaching the local network"

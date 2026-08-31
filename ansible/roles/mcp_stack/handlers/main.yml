@@ -7,3 +7,6 @@
     chdir: "{{ mcp_deploy_dir }}"
   become: true
   changed_when: true
+  # A dry run reports this rather than running it; the directory it would run
+  # in is only created for real.
+  when: not ansible_check_mode

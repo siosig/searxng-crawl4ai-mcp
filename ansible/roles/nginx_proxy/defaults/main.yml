@@ -1,6 +1,16 @@
 ---
-nginx_proxy_conf_dir: /etc/nginx/conf.d
+# Where the location block goes.
+#
+# A `location` is only valid inside a `server`, so this must be a directory the
+# site's server block includes - typically via a line such as
+# `include /etc/nginx/locations.d/*.conf;`. Dropping it into conf.d instead
+# would put it at http level and nginx would refuse to start.
+nginx_proxy_locations_dir: /etc/nginx/locations.d
+nginx_proxy_conf_name: mcp-searxng-crawl4ai.conf
+
 nginx_proxy_location: /mcp-searxng-crawl4ai
 mcp_port: 3003
-# Long-running crawls hold the connection open; the default 60s would cut them.
+
+# Crawls hold the connection open while pages are fetched one level at a time;
+# the 60s default would cut them off mid-run.
 nginx_proxy_read_timeout: 600
