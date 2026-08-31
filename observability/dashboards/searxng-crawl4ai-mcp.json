@@ -1023,12 +1023,157 @@
     },
     {
       "type": "row",
-      "title": "The server itself",
+      "title": "Retries and shortfalls",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
         "y": 51
+      },
+      "id": 26,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Upstream retries",
+      "description": "Transient upstream failures that were absorbed before the caller saw them. A flat line means the upstreams are steady; a standing rate means they are not, even though every tool call still succeeded.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 52
+      },
+      "id": 27,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (upstream, reason) (rate(mcp_upstream_retries_total{job=\"$job\"}[$__rate_interval]) * 60)",
+          "range": true,
+          "refId": "A",
+          "legendFormat": "{{upstream}} / {{reason}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "last",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Searches that came up short",
+      "description": "Searches that returned fewer results than were asked for. The reason is what to act on: page_limit means the page ceiling no longer matches reality, time_budget means the upstream got slow, upstream_failed means it got unreliable, exhausted means the web simply has no more.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 52
+      },
+      "id": 28,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (reason) (rate(mcp_search_shortfall_total{job=\"$job\"}[$__rate_interval]) * 60)",
+          "range": true,
+          "refId": "A",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "last",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "The server itself",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 60
       },
       "id": 21,
       "collapsed": false,
@@ -1042,7 +1187,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 61
       },
       "id": 22,
       "datasource": {
@@ -1103,7 +1248,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 52
+        "y": 61
       },
       "id": 23,
       "datasource": {
@@ -1163,7 +1308,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 58
+        "y": 67
       },
       "id": 24,
       "collapsed": false,
@@ -1177,7 +1322,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 59
+        "y": 68
       },
       "id": 25,
       "datasource": {

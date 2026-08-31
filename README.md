@@ -11,9 +11,9 @@ it possible to follow their releases instead of drifting away from them.
 ## Why this exists
 
 The obvious way to build this is to import the scraping library and call it
-directly. That is what the project this replaces did, and it is why that project
-stopped being maintainable: every upstream release changed an internal API, the
-wrapper broke, and nothing noticed until a search quietly returned nothing.
+directly. That road ends badly, and predictably: every upstream release changes
+an internal API, the wrapper breaks, and nothing notices until a search quietly
+returns nothing.
 
 So the constraint here is stated up front and enforced by tests:
 
@@ -42,7 +42,7 @@ in Crawl4AI, and nothing is cached between calls.
 
 | Tool | What it does |
 |------|--------------|
-| `web_search` | Search the web across multiple engines |
+| `web_search` | Search the web across multiple engines, optionally narrowed by engine, time range or safe-search level |
 | `web_scrape` | Fetch one page as markdown |
 | `web_search_and_scrape` | Search, then fetch the top results |
 | `web_batch_scrape` | Fetch several pages, reporting per-URL success |
@@ -53,6 +53,50 @@ in Crawl4AI, and nothing is cached between calls.
 
 Failures are returned, not thrown, and carry a machine-readable reason so the
 caller can tell "the site is down" apart from "that target is not allowed".
+
+A search reports whether it actually returned the number of results it was
+asked for, and when it did not, why: the results ran out, the page limit was
+reached, the time budget was spent, or an upstream failed partway. An agent that
+gets fewer results than it asked for can otherwise not tell "the web has no more
+of this" from "this server stopped looking", and those call for opposite next
+moves.
+
+A request to SearXNG or Crawl4AI that fails quickly - a refused connection, a
+502, a rate limit - is retried with backoff. One that fails by using up its own
+timeout is not: repeating it would double a wait that has already proved too
+long. The rule is a single budget rather than a list of special cases, so
+retrying never adds more than two seconds to any call.
+`web_crawl` also reports why it stopped - a page limit, a depth limit or nothing
+left to visit - so a truncated crawl is visible instead of looking complete.
+Responses are capped at 25,000 characters and say so when they were cut.
+
+## Two ways to run it
+
+| | Streamable HTTP | stdio |
+|---|---|---|
+| Who starts the process | the container runtime | the MCP client |
+| Needs a bearer token | yes | no - there is no port to defend |
+| Needs a Host allow-list | yes | no |
+| Reachable from other machines | yes, through a reverse proxy | no |
+| Tools exposed | the same eight | the same eight |
+
+Both entries are built from the same server factory, so neither can grow a
+capability the other lacks. `MCP_TRANSPORT` picks between them and defaults to
+`http`; the deployed stack is unaffected by the existence of the other one.
+
+stdio exists so that trying this out does not require issuing a token and
+putting a reverse proxy in front of it. It is for one person on one machine:
+
+```sh
+MCP_TRANSPORT=stdio \
+SEARXNG_URL=http://127.0.0.1:8081 \
+CRAWL4AI_URL=http://127.0.0.1:11235 \
+CRAWL4AI_API_TOKEN=... \
+node dist/index.js
+```
+
+The outbound address policy, the fetch budget and the response size cap apply
+identically in both. What stdio drops is only what a listener needed.
 
 ## Requirements
 
@@ -114,10 +158,6 @@ Contract tests come in two tiers. Tier A runs against a fixture site inside CI
 and gates merges. Tier B talks to the live internet, and is reported but not
 gating, because a datacenter IP being blocked by a search engine says nothing
 about whether this code is correct.
-
-## Migrating from the previous server
-
-Tool names changed and two merged. See [docs/migration.md](docs/migration.md).
 
 ## License
 

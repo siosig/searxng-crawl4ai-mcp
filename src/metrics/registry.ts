@@ -102,3 +102,27 @@ export const concurrencyRejected = new Counter({
   help: "Calls refused because every fetch slot was busy.",
   registers: [registry],
 });
+
+export const upstreamRetries = new Counter({
+  name: "mcp_upstream_retries_total",
+  help: "Retries made against an upstream service, by classified cause.",
+  // No `operation` label. It would push the ceiling from 8 series to 48, and
+  // which operation is retrying can already be read off the simultaneous
+  // movement of mcp_upstream_requests_total{result="failure"} and
+  // mcp_upstream_duration_seconds{operation=...}. The information is not lost,
+  // only not duplicated at a cost.
+  labelNames: ["upstream", "reason"] as const,
+  registers: [registry],
+});
+
+export const searchShortfall = new Counter({
+  name: "mcp_search_shortfall_total",
+  help: "Searches that returned fewer results than requested, by reason.",
+  // Distinguishing these four is the entire reason this metric exists. A
+  // standing `page_limit` means the page ceiling no longer matches reality; a
+  // standing `time_budget` means the upstream got slow; `upstream_failed`
+  // means it got unreliable. A single "searches came up short" counter would
+  // answer none of those.
+  labelNames: ["reason"] as const,
+  registers: [registry],
+});

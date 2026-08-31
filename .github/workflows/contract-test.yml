@@ -54,13 +54,21 @@ jobs:
             echo "CRAWL4AI_API_TOKEN=$(openssl rand -hex 32)"
             echo "MCP_ALLOWED_HOSTS=localhost,127.0.0.1"
             echo "MCP_PORT=3003"
+            # Without this - and without the metrics overlay below - the metrics
+            # listener is never created, and every test that reads it skips
+            # itself. Ten of them did exactly that from the day they were
+            # written: this job reported green while the cardinality guard,
+            # which exists to stop an unbounded label from growing a shared
+            # time-series database, had never once run.
+            echo "METRICS_PORT=9464"
           } > .env
 
       - name: Start the stack
         run: |
           set -a; . ./.env; set +a
           docker compose --env-file versions.env --env-file .env \
-            -f docker/compose.yaml -f docker/compose.test.yaml up -d --wait --wait-timeout 300
+            -f docker/compose.yaml -f docker/compose.test.yaml -f docker/compose.metrics.yaml \
+            up -d --wait --wait-timeout 300
 
       - name: Run Tier A
         env:
@@ -69,6 +77,10 @@ jobs:
           FIXTURE_PROBE: http://fixture-site/index.html
           SEARXNG_PROBE_URL: http://127.0.0.1:8081
           CRAWL4AI_PROBE_URL: http://127.0.0.1:11235
+          # Must agree with METRICS_PORT above. Kept as a literal rather than
+          # interpolated so that both halves of the agreement are visible in
+          # one file, the same way MCP_PORT and MCP_ENDPOINT already are.
+          METRICS_URL: http://127.0.0.1:9464/metrics
         run: |
           set -a; . ./.env; set +a
           pnpm test:contract:tier-a
@@ -81,20 +93,23 @@ jobs:
         run: |
           set -a; . ./.env; set +a
           GEMINI_API_KEY= docker compose --env-file versions.env --env-file .env \
-            -f docker/compose.yaml -f docker/compose.test.yaml up -d --force-recreate --wait --wait-timeout 180 mcp
+            -f docker/compose.yaml -f docker/compose.test.yaml -f docker/compose.metrics.yaml \
+            up -d --force-recreate --wait --wait-timeout 180 mcp
           pnpm exec tsx --test "tests/contract/tier-a/degraded.test.ts"
 
       - name: Container logs on failure
         if: failure()
         run: |
           docker compose --env-file versions.env --env-file .env \
-            -f docker/compose.yaml -f docker/compose.test.yaml logs --tail 200
+            -f docker/compose.yaml -f docker/compose.test.yaml -f docker/compose.metrics.yaml \
+            logs --tail 200
 
       - name: Tear down
         if: always()
         run: |
           docker compose --env-file versions.env --env-file .env \
-            -f docker/compose.yaml -f docker/compose.test.yaml down -v || true
+            -f docker/compose.yaml -f docker/compose.test.yaml -f docker/compose.metrics.yaml \
+            down -v || true
 
   tier-b:
     name: Tier B - live internet (reported, not gating)

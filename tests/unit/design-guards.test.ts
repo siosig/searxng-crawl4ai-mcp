@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
+import { buildServer, TOOL_NAMES } from "../../src/server.js";
 
 /**
  * These are not tests of behaviour. They are the executable form of the design
@@ -78,4 +80,57 @@ test("only src/upstream speaks HTTP to the upstream services", () => {
 test("the deployment builds nothing on the target host", () => {
   const compose = read(join(ROOT, "docker/compose.yaml"));
   assert.ok(!/^\s*build:/m.test(compose), "production compose must pull images, not build them");
+});
+
+test("both transports expose exactly the tools this server claims to have", async () => {
+  // Two entries, one factory. The rule is that a transport decides who may
+  // reach the tools, never which tools exist - so neither entry may assemble a
+  // server of its own, and the list below is the only list.
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  const server = buildServer();
+  await server.connect(serverSide);
+
+  const replies: JSONRPCMessage[] = [];
+  clientSide.onmessage = (message) => replies.push(message);
+  await clientSide.start();
+  await clientSide.send({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "design-guards", version: "1.0.0" },
+    },
+  });
+  await clientSide.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+  await clientSide.send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+
+  // The pair delivers on a microtask; the handler is async.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await server.close();
+
+  const listed = replies.find(
+    (message): message is JSONRPCMessage & { result: { tools: { name: string }[] } } =>
+      "id" in message && message.id === 2 && "result" in message,
+  );
+  assert.ok(listed, "the built server did not answer tools/list");
+
+  assert.deepEqual(
+    listed.result.tools.map((tool) => tool.name).sort(),
+    [...TOOL_NAMES].sort(),
+    "the advertised tools and TOOL_NAMES disagree; the contract tests are checking a stale list",
+  );
+
+  // And the entries hand that server over rather than building one. A tool
+  // registered in an entry file would be reachable over one transport only,
+  // which is the capability split this guard exists to prevent.
+  for (const entry of ["src/transport/http.ts", "src/transport/stdio.ts"]) {
+    const source = read(join(ROOT, entry));
+    assert.match(source, /\(\) => buildServer\(\)/, `${entry} does not serve the shared factory`);
+    assert.ok(
+      !/register[A-Za-z]*Tool\s*\(/.test(source),
+      `${entry} registers a tool of its own; only src/server.ts may decide the tool list`,
+    );
+  }
 });

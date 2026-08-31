@@ -58,6 +58,45 @@ test("series stop appearing once the finite label space is covered", { skip }, a
   );
 });
 
+test("the labels added by 003 can only take values we enumerated", { skip }, async () => {
+  // Both counters are absent until the thing they count happens - a retry, or a
+  // search that came up short - and a healthy stack may produce neither during
+  // a run. So this asserts a property of whatever is there, not that anything
+  // is: it is the *values* that must come from a set decided in advance, which
+  // is the whole of the cardinality discipline.
+  const allowed: Record<string, ReadonlySet<string>> = {
+    "mcp_upstream_retries_total|upstream": new Set(["searxng", "crawl4ai"]),
+    "mcp_upstream_retries_total|reason": new Set([
+      "connect",
+      "http_5xx",
+      "rate_limited",
+      "timeout",
+    ]),
+    "mcp_search_shortfall_total|reason": new Set([
+      "exhausted",
+      "page_limit",
+      "time_budget",
+      "upstream_failed",
+    ]),
+  };
+
+  for (const line of mcpSeries(await fetchMetrics())) {
+    const name = line.slice(0, line.indexOf("{") === -1 ? undefined : line.indexOf("{"));
+    if (!name.startsWith("mcp_upstream_retries_total") && !name.startsWith("mcp_search_shortfall_total")) {
+      continue;
+    }
+    for (const [, label, value] of line.matchAll(/(\w+)="([^"]*)"/g)) {
+      const permitted = allowed[`${name}|${label!}`];
+      assert.ok(permitted, `${name} carries an unexpected label "${label!}"`);
+      assert.ok(
+        permitted.has(value!),
+        `${name}{${label!}="${value!}"} is outside the enumerated set; ` +
+          `an upstream is choosing this label's wording`,
+      );
+    }
+  }
+});
+
 test("the total number of series stays small enough to reason about", { skip }, async () => {
   const series = mcpSeries(await fetchMetrics());
   assert.ok(

@@ -28,11 +28,30 @@ export function render(
   return truncate(text);
 }
 
-export function truncate(text: string, limit = CHARACTER_LIMIT): Rendered {
+/**
+ * `gathered` is how many items were collected before the text was cut.
+ *
+ * Optional, and absent for every caller that has nothing to say here. Where it
+ * applies - a search that paged until it had the requested count - the two
+ * numbers answer different questions: how much was found, and how much fitted.
+ * Without the first, a caller reading a cut list has no way to tell a thin
+ * result set from a long one that ran into the size limit, and would narrow a
+ * query that was already working (FR-032).
+ */
+export function truncate(
+  text: string,
+  limit = CHARACTER_LIMIT,
+  gathered?: number,
+): Rendered {
   if (text.length <= limit) return { text, truncated: false };
 
+  const found =
+    gathered === undefined
+      ? ""
+      : ` ${gathered} results were gathered; the text above stops part way through them.`;
+
   const notice =
-    "\n\n[truncated: the response exceeded the size limit. Narrow the request " +
+    `\n\n[truncated: the response exceeded the size limit.${found} Narrow the request ` +
     "- fewer URLs, a lower page limit, or a more specific query.]";
 
   return { text: text.slice(0, limit - notice.length) + notice, truncated: true };

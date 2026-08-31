@@ -33,14 +33,24 @@ export const ANNOTATIONS = {
   openWorldHint: true,
 } as const;
 
-/** Build an MCP response, truncating oversized output and reporting that it did. */
+/**
+ * Build an MCP response, truncating oversized output and reporting that it did.
+ *
+ * `gathered` is how many items the tool actually obtained, when that is a
+ * meaningful number. It changes nothing unless the output had to be cut, and
+ * then it is the difference between "the response was too long" and "we found
+ * 50 of these and the text stops part way through them" - the second tells the
+ * caller that asking for the machine-readable format would hand back all of
+ * them, which the first does not.
+ */
 export function reply(
   markdown: string,
   structured: Record<string, unknown>,
   format: Format,
+  gathered?: number,
 ): CallToolResult {
   const body = format === "json" ? JSON.stringify(structured, null, 2) : markdown;
-  const { text, truncated } = truncate(body);
+  const { text, truncated } = truncate(body, undefined, gathered);
   return {
     content: [{ type: "text", text }],
     structuredContent: { ...structured, truncated },

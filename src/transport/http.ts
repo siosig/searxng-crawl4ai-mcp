@@ -7,7 +7,7 @@ import {
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { buildServer, SERVER_NAME, SERVER_VERSION } from "../server.js";
 import { isAuthorized } from "../security/auth.js";
-import { env } from "../utils/env.js";
+import { httpConfig } from "../utils/env.js";
 import { logger } from "../utils/logger.js";
 
 const MCP_PATH = "/mcp";
@@ -44,7 +44,10 @@ function asWebRequest(req: IncomingMessage): Request {
 }
 
 export function startHttpServer(): Server {
-  const config = env();
+  // Narrowed here rather than read from env() directly: the token and the
+  // host allow-list are optional in the schema because the stdio entry has no
+  // use for them, and this entry must not carry that uncertainty around.
+  const config = httpConfig();
   const handler = createMcpHandler(() => buildServer(), {
     onerror: (error) => logger.error({ err: error }, "MCP handler error"),
   });

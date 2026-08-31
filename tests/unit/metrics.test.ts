@@ -9,8 +9,12 @@ import {
   recordDocuments,
   recordSearch,
   recordSlots,
+  recordSearchShortfall,
   recordToolCall,
   recordUpstream,
+  recordUpstreamRetry,
+  type RetryReason,
+  type ShortfallReasonLabel,
 } from "../../src/metrics/record.js";
 import { registry } from "../../src/metrics/registry.js";
 
@@ -65,6 +69,8 @@ test("recording is a no-op while metrics are disabled", async () => {
   recordSearch(0, [{ engine: "google", reason: "CAPTCHA" }]);
   recordDocuments(["ok", "failed"]);
   recordUpstream("crawl4ai", "markdown", "success", 0.5);
+  recordUpstreamRetry("searxng", "http_5xx");
+  recordSearchShortfall("time_budget");
   recordSlots(2, 4);
   recordConcurrencyRejection();
 
@@ -74,6 +80,11 @@ test("recording is a no-op while metrics are disabled", async () => {
     !text.includes("mcp_tool_calls_total{"),
     "nothing should have been recorded while disabled",
   );
+  assert.ok(
+    !text.includes("mcp_upstream_retries_total{"),
+    "the two counters added for retries and shortfalls are disabled like the rest",
+  );
+  assert.ok(!text.includes("mcp_search_shortfall_total{"));
 });
 
 test("recording never throws, whatever it is handed", () => {
@@ -87,6 +98,47 @@ test("recording never throws, whatever it is handed", () => {
   assert.doesNotThrow(() => recordDocuments([]));
   assert.doesNotThrow(() => recordUpstream("crawl4ai", "markdown", "success", Number.POSITIVE_INFINITY));
   assert.doesNotThrow(() => recordSlots(Number.NaN, Number.NaN));
+
+  disableMetrics();
+});
+
+test("the retry and shortfall counters only ever carry the labels they declare", async () => {
+  enableMetrics();
+
+  // Written out rather than derived, so that widening either union has to be a
+  // deliberate edit here too. Cardinality is a promise made in
+  // specs/003-search-controls-retry-stdio/contracts/metrics.md, and a label
+  // value that arrives from an upstream would break it silently.
+  const reasons: readonly RetryReason[] = ["connect", "http_5xx", "rate_limited", "timeout"];
+  const shortfalls: readonly ShortfallReasonLabel[] = [
+    "exhausted",
+    "page_limit",
+    "time_budget",
+    "upstream_failed",
+  ];
+
+  for (const reason of reasons) {
+    recordUpstreamRetry("searxng", reason);
+    recordUpstreamRetry("crawl4ai", reason);
+  }
+  for (const reason of shortfalls) recordSearchShortfall(reason);
+
+  const text = await registry.metrics();
+  const retryLabels = [...text.matchAll(/mcp_upstream_retries_total\{([^}]*)\}/g)].map(
+    (match) => match[1] ?? "",
+  );
+  assert.equal(retryLabels.length, reasons.length * 2, "two upstreams times four causes");
+  for (const labels of retryLabels) {
+    assert.match(labels, /^upstream="(searxng|crawl4ai)",reason="(connect|http_5xx|rate_limited|timeout)"$/);
+  }
+
+  const shortfallLabels = [...text.matchAll(/mcp_search_shortfall_total\{([^}]*)\}/g)].map(
+    (match) => match[1] ?? "",
+  );
+  assert.equal(shortfallLabels.length, shortfalls.length);
+  for (const labels of shortfallLabels) {
+    assert.match(labels, /^reason="(exhausted|page_limit|time_budget|upstream_failed)"$/);
+  }
 
   disableMetrics();
 });

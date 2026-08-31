@@ -117,6 +117,42 @@ export function recordUpstream(
   });
 }
 
+/**
+ * Why a retry happened, in the four buckets the metric exposes.
+ *
+ * Deliberately coarser than `FailureKind`: an operator watching this panel is
+ * asking "is the upstream refusing connections, straining, or rate-limiting
+ * us?", and a finer split would multiply series without changing the answer.
+ */
+export type RetryReason = "connect" | "http_5xx" | "rate_limited" | "timeout";
+
+/** Count one retry that was actually performed - not one that was considered. */
+export function recordUpstreamRetry(upstream: Upstream, reason: RetryReason): void {
+  safely(() => {
+    m.upstreamRetries.inc({ upstream, reason });
+  });
+}
+
+/** Why a search returned fewer results than were asked for. */
+export type ShortfallReasonLabel =
+  | "exhausted"
+  | "page_limit"
+  | "time_budget"
+  | "upstream_failed";
+
+/**
+ * Count one search that came up short.
+ *
+ * Only called when the search did not reach the requested count. A satisfied
+ * search records nothing here, so the rate of this counter reads directly as
+ * "how often are we failing to deliver what was asked for".
+ */
+export function recordSearchShortfall(reason: ShortfallReasonLabel): void {
+  safely(() => {
+    m.searchShortfall.inc({ reason });
+  });
+}
+
 export function recordSlots(inUse: number, limit: number): void {
   safely(() => {
     m.fetchSlotsInUse.set(inUse);

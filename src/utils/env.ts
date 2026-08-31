@@ -1,5 +1,9 @@
 import * as z from "zod/v4";
-import { DEFAULT_MAX_CONCURRENT_FETCHES, DEFAULT_PORT } from "../constants.js";
+import {
+  DEFAULT_MAX_CONCURRENT_FETCHES,
+  DEFAULT_PORT,
+  DEFAULT_RETRY_ATTEMPTS,
+} from "../constants.js";
 
 /**
  * Configuration, validated once at startup.
@@ -23,21 +27,39 @@ const optionalNonEmpty = z
   .transform((s) => (s === "" ? undefined : s))
   .optional();
 
-const EnvSchema = z.object({
+const BaseEnvSchema = z.object({
+  // --- How this process talks to its client. ---
+
+  // Two entries, not two builds: both serve the same tools from the same
+  // buildServer() factory, and they differ only in what sits in front of it.
+  //
+  //   http  - a listener, so a token and a Host allow-list are what stand
+  //           between the tools and anyone who can reach the port.
+  //   stdio - the client owns the process and speaks over its pipes. There is
+  //           no listener, so there is nothing for a token to protect; asking
+  //           for one would be a ritual rather than a control.
+  //
+  // Chosen through the environment like every other setting here. A command
+  // line flag would be a second place to configure this server, and the two
+  // would eventually disagree.
+  MCP_TRANSPORT: z.enum(["http", "stdio"]).default("http"),
+
   // --- Required. Absence is a startup failure, never a permissive default. ---
 
   // Without a token the server would be an open scraping proxy for anyone who
   // can reach the port, so an unset value must stop the process rather than
-  // start it unauthenticated.
+  // start it unauthenticated. Optional *here* only so that the stdio entry,
+  // which opens no port, is not made to invent one; the refinement below still
+  // makes it mandatory whenever there is a port to defend.
   MCP_AUTH_TOKEN: z
     .string()
-    .min(16, "MCP_AUTH_TOKEN must be at least 16 characters"),
+    .min(16, "MCP_AUTH_TOKEN must be at least 16 characters")
+    .optional(),
 
   // DNS-rebinding protection. An empty list would allow every Host.
-  MCP_ALLOWED_HOSTS: csv.refine(
-    (hosts) => hosts.length > 0,
-    "MCP_ALLOWED_HOSTS must list at least one hostname",
-  ),
+  MCP_ALLOWED_HOSTS: csv
+    .refine((hosts) => hosts.length > 0, "MCP_ALLOWED_HOSTS must list at least one hostname")
+    .optional(),
 
   SEARXNG_URL: z.url("SEARXNG_URL must be a URL"),
   CRAWL4AI_URL: z.url("CRAWL4AI_URL must be a URL"),
@@ -77,6 +99,21 @@ const EnvSchema = z.object({
     .max(32)
     .default(DEFAULT_MAX_CONCURRENT_FETCHES),
 
+  // Attempts against an upstream, including the first. 1 - or 0, read the same
+  // way - turns retrying off entirely, which is the escape hatch for an
+  // operator who would rather see every transient failure than have them
+  // absorbed.
+  //
+  // The ceiling is 5 because the wait budget in src/constants.ts stops a sixth
+  // attempt from ever being reached; allowing a larger number would only
+  // suggest an effect it cannot have.
+  RETRY_MAX_ATTEMPTS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(5)
+    .default(DEFAULT_RETRY_ATTEMPTS),
+
   LOG_LEVEL: z
     .enum(["trace", "debug", "info", "warn", "error", "fatal"])
     .default("info"),
@@ -102,7 +139,73 @@ const EnvSchema = z.object({
   METRICS_HOST: z.string().min(1).default("127.0.0.1"),
 });
 
+/**
+ * The two settings that only mean something when there is a listener.
+ *
+ * Enforced here rather than in the field definitions because whether they are
+ * required is a fact about the transport, not about the fields. Writing it as a
+ * refinement keeps the requirement in one readable place and keeps the failure
+ * where every other configuration failure already happens: at startup, naming
+ * the variable.
+ */
+const EnvSchema = BaseEnvSchema.superRefine((value, ctx) => {
+  if (value.MCP_TRANSPORT !== "http") return;
+
+  if (value.MCP_AUTH_TOKEN === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["MCP_AUTH_TOKEN"],
+      message:
+        "MCP_AUTH_TOKEN is required when MCP_TRANSPORT is http; without it the " +
+        "listener would be an open scraping proxy",
+    });
+  }
+
+  if (value.MCP_ALLOWED_HOSTS === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["MCP_ALLOWED_HOSTS"],
+      message:
+        "MCP_ALLOWED_HOSTS is required when MCP_TRANSPORT is http; without it " +
+        "every Host header would be accepted",
+    });
+  }
+});
+
 export type Env = z.infer<typeof EnvSchema>;
+
+/**
+ * The listener's settings, with the two conditional ones narrowed.
+ *
+ * `MCP_AUTH_TOKEN` and `MCP_ALLOWED_HOSTS` are optional in the schema because
+ * the stdio entry does not need them, which leaves them `string | undefined`
+ * for every reader. Rather than scatter assertions through the HTTP transport,
+ * the narrowing happens once, here, next to the refinement that guarantees it.
+ *
+ * Throwing is unreachable in practice: validateEnv() has already refused to
+ * start a http process without these. It is a guard against a future caller
+ * reaching for this from the stdio path, not a runtime condition to handle.
+ */
+export function httpConfig(): {
+  readonly MCP_AUTH_TOKEN: string;
+  // Mutable rather than readonly: the SDK's host and origin validators take a
+  // `string[]`, and widening their signature is not ours to do.
+  readonly MCP_ALLOWED_HOSTS: string[];
+  readonly PORT: number;
+} {
+  const config = env();
+  if (config.MCP_AUTH_TOKEN === undefined || config.MCP_ALLOWED_HOSTS === undefined) {
+    throw new Error(
+      "httpConfig() was called without the HTTP transport's settings; " +
+        "this path is only reachable when MCP_TRANSPORT is http",
+    );
+  }
+  return {
+    MCP_AUTH_TOKEN: config.MCP_AUTH_TOKEN,
+    MCP_ALLOWED_HOSTS: config.MCP_ALLOWED_HOSTS,
+    PORT: config.PORT,
+  };
+}
 
 let cached: Env | null = null;
 

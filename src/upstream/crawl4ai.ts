@@ -161,6 +161,10 @@ export async function crawl(urls: readonly string[]): Promise<FetchedDocument[]>
     method: "POST",
     token: token(),
     body: { urls: [...urls] },
+    // A POST that creates nothing: the server fetches the pages and answers
+    // with what it read, keeping no record of having been asked. Sending it
+    // again after a transient failure costs another fetch and nothing else.
+    idempotent: true,
     upstream: "crawl4ai",
     operation: "crawl",
   });
@@ -199,7 +203,16 @@ export async function crawl(urls: readonly string[]): Promise<FetchedDocument[]>
 export async function getMarkdown(url: string): Promise<FetchedDocument> {
   const { body } = await request<{ markdown?: unknown; success?: unknown }>(
     base("/md"),
-    { method: "POST", token: token(), body: { url }, upstream: "crawl4ai", operation: "markdown" },
+    {
+      method: "POST",
+      token: token(),
+      body: { url },
+      // POST only because the URL travels in the body. Nothing is created; the
+      // same request run twice re-reads the page and returns the same shape.
+      idempotent: true,
+      upstream: "crawl4ai",
+      operation: "markdown",
+    },
   );
 
   const markdown = markdownOf(body.markdown);
@@ -233,6 +246,11 @@ export async function submitCrawlJob(urls: readonly string[]): Promise<string> {
     token: token(),
     body: { urls: [...urls] },
     expect: [202],
+    // No `idempotent` here, and that is the point. This is the one call that
+    // creates something: a retry after a failure that the server had in fact
+    // accepted would leave a second job running, and the caller would only ever
+    // learn the id of one of them - the other would crawl on unowned. A
+    // transient failure surfacing to the caller is the cheaper outcome.
     upstream: "crawl4ai",
     operation: "submit_job",
   });

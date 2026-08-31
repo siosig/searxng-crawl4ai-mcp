@@ -40,6 +40,12 @@ export function registerSearchAndScrapeTool(server: McpServer): void {
           query: params.query,
           limit: params.topN,
           language: params.language,
+          // Same three as web_search, forwarded the same way. Narrowing the
+          // search is what decides which pages get read here, so it matters
+          // more in this tool than in the one that only lists hits.
+          engines: params.engines,
+          timeRange: params.timeRange,
+          safesearch: params.safesearch,
         });
 
         const urls = result.results.slice(0, params.topN).map((h) => h.url);
