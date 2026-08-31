@@ -17,7 +17,6 @@ Deploys the stack to a single always-on Linux host.
 ```sh
 cp inventory/hosts.example.yml inventory/hosts.yml
 # edit hosts.yml, then create host_vars/<host>/{vars,vault}.yml
-ansible-galaxy collection install -r requirements.yml
 ansible-vault encrypt host_vars/<host>/vault.yml
 ```
 
@@ -37,12 +36,3 @@ Running it twice should report no changes.
 Edit the tag in `versions.env`, let the contract tests pass, then run the
 playbook again. To roll back, restore the previous `versions.env` and re-run:
 image tags are pinned, so the earlier state is reproducible.
-
-## Remove a previous deployment
-
-```sh
-ansible-playbook site.yml --tags legacy_cleanup
-```
-
-Not part of a normal run: removing a working deployment should be asked for by
-name.
