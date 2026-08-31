@@ -12,8 +12,14 @@
     maintained in two places, and the hostname never enters a tracked file.
 
     .env keys (see .env.example):
-      MCP_PUBLIC_ENDPOINT   the URL clients connect to, including the path
-      MCP_AUTH_TOKEN        the bearer token the endpoint enforces
+      MCP_PUBLIC_ENDPOINT     the URL clients connect to, including the path
+      MCP_PUBLIC_AUTH_TOKEN   the token that endpoint enforces; falls back to
+                              MCP_AUTH_TOKEN when unset
+
+    The two token keys exist because .env describes two things at once: the
+    stack this checkout runs locally, and the deployment the client should talk
+    to. Those are the same while pointing at the local stack, and different as
+    soon as the endpoint is a deployed host.
 
 .PARAMETER Endpoint
     Overrides MCP_PUBLIC_ENDPOINT from .env.
@@ -87,6 +93,7 @@ Write-Ok "claude: $($claude.Source)"
 
 # --- 2. Configuration --------------------------------------------------------
 if (-not $Endpoint) { $Endpoint = Get-EnvValue 'MCP_PUBLIC_ENDPOINT' }
+if (-not $Token)    { $Token    = Get-EnvValue 'MCP_PUBLIC_AUTH_TOKEN' }
 if (-not $Token)    { $Token    = Get-EnvValue 'MCP_AUTH_TOKEN' }
 
 if (-not $Endpoint) {
@@ -94,7 +101,7 @@ if (-not $Endpoint) {
     exit 1
 }
 if (-not $Token) {
-    Write-Error "No token. Set MCP_AUTH_TOKEN in $EnvFile, or pass -Token."
+    Write-Error "No token. Set MCP_PUBLIC_AUTH_TOKEN (or MCP_AUTH_TOKEN) in $EnvFile, or pass -Token."
     exit 1
 }
 $manifest = Join-Path $RepoDir '.claude-plugin/marketplace.json'

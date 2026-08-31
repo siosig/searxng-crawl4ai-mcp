@@ -16,8 +16,15 @@
 # maintained in two places, and the hostname never enters a tracked file.
 #
 # .env keys (see .env.example):
-#   MCP_PUBLIC_ENDPOINT   the URL clients connect to, including the path
-#   MCP_AUTH_TOKEN        the bearer token the endpoint enforces
+#   MCP_PUBLIC_ENDPOINT     the URL clients connect to, including the path
+#   MCP_PUBLIC_AUTH_TOKEN   the token that endpoint enforces; falls back to
+#                           MCP_AUTH_TOKEN when unset
+#
+# The two token keys exist because .env describes two things at once: the stack
+# this checkout runs locally (MCP_AUTH_TOKEN) and the deployment the client
+# should talk to. Those are the same while pointing at the local stack, and
+# different as soon as the endpoint is a deployed host - at which point sending
+# the local token would just produce a 401.
 #
 # Environment variables override .env when set:
 #   SEARXNG_CRAWL4AI_ENDPOINT           endpoint URL
@@ -44,7 +51,8 @@ _env_get() {
 }
 
 ENDPOINT="${SEARXNG_CRAWL4AI_ENDPOINT:-$(_env_get MCP_PUBLIC_ENDPOINT)}"
-TOKEN="${SEARXNG_CRAWL4AI_ACCESS_TOKEN:-$(_env_get MCP_AUTH_TOKEN)}"
+TOKEN="${SEARXNG_CRAWL4AI_ACCESS_TOKEN:-$(_env_get MCP_PUBLIC_AUTH_TOKEN)}"
+[[ -z "${TOKEN}" ]] && TOKEN="$(_env_get MCP_AUTH_TOKEN)"
 SCOPE="${PLUGIN_SCOPE:-user}"
 
 MARKETPLACE_NAME="searxng-crawl4ai-mcp"
@@ -87,7 +95,7 @@ if [[ -z "${ENDPOINT}" ]]; then
   exit 1
 fi
 if [[ -z "${TOKEN}" ]]; then
-  echo "ERROR: no token. Set MCP_AUTH_TOKEN in ${ENV_FILE}," >&2
+  echo "ERROR: no token. Set MCP_PUBLIC_AUTH_TOKEN (or MCP_AUTH_TOKEN) in ${ENV_FILE}," >&2
   echo "       or pass SEARXNG_CRAWL4AI_ACCESS_TOKEN in the environment." >&2
   exit 1
 fi
