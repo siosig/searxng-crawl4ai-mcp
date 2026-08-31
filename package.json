@@ -9,6 +9,7 @@
   "engines": {
     "node": ">=22"
   },
+  "packageManager": "pnpm@11.6.0",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
