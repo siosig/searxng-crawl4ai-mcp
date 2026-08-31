@@ -1,0 +1,30 @@
+# gitleaks configuration.
+#
+# The default rules are kept in full - this file only narrows them, and only for
+# a value that cannot be a credential.
+#
+# Why this exists: `src/utils/env.ts` requires MCP_AUTH_TOKEN and
+# CRAWL4AI_API_TOKEN to be at least sixteen characters, so a test that exercises
+# the validator has to hand it something that long. The fixture used is
+# `0123456789abcdef` twice over, which reads as a placeholder to a person but
+# scores 4.0 on gitleaks' entropy check and trips `generic-api-key`.
+#
+# Allowlisting the value rather than the file is deliberate. A path-based rule
+# would mean a real credential pasted into any test goes unnoticed, which is the
+# failure this gate exists to prevent; this way a genuine secret in a test still
+# fails the build, and only this one obviously-fake string is exempt.
+#
+# The exemption is also load-bearing for history. gitleaks scans every commit,
+# so editing the fixture would not clear the finding - the earlier commit still
+# contains it. Only a configured allowlist settles it without rewriting a
+# published history.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholder credentials in tests, long enough to satisfy the schema and nothing more"
+regexTarget = "line"
+regexes = [
+  '''0123456789abcdef0123456789abcdef''',
+]
