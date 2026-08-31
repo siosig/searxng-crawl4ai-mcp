@@ -2,7 +2,29 @@
 /.vscode/
 /.specify/
 /specs/
-/CLAUDE.md/
+/CLAUDE.md
 
 # secretlint local-only denylist (company/personal terms — never committed)
 .secretlintrc.local.json
+/tmp/
+
+# Secrets and environment-specific values.
+# NOTE: a trailing slash here would match only a *directory* of that name, so
+# these patterns deliberately have none — `.env` is a file.
+.env
+.env.*
+!.env.example
+
+# Ansible: the roles/playbooks are public, the inventory that names the real
+# host is not. Only the example inventory is committed.
+/ansible/inventory/hosts.yml
+/ansible/inventory/host_vars/
+/ansible/*.retry
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Runtime
+/logs/
