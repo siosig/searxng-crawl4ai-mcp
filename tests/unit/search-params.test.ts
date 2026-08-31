@@ -179,3 +179,33 @@ test("each narrowing argument reaches the upstream under its own name", async ()
   // quietly leave the instance's own default in force.
   assert.equal(params.get("safesearch"), "0");
 });
+
+test("naming engines narrows the search instead of widening it", async () => {
+  // SearXNG unions `engines` with `categories`, so sending both asks for the
+  // named engines *plus* everything in the category. Since `categories`
+  // defaults to ["general"], every call was sending it, and the parameter this
+  // tool advertises as a way to limit a search never limited anything -
+  // measured against a live instance, asking for duckduckgo came back entirely
+  // from brave and google cse.
+  const withEngines = firstQuery(
+    await requestedUrls({
+      query: "q",
+      limit: 5,
+      categories: ["general"],
+      engines: ["duckduckgo"],
+    }),
+  );
+  assert.equal(withEngines.get("engines"), "duckduckgo");
+  assert.equal(
+    withEngines.get("categories"),
+    null,
+    "categories alongside engines widens the selection back out",
+  );
+
+  // And the ordinary call is untouched: no engines named, category still sent.
+  const withoutEngines = firstQuery(
+    await requestedUrls({ query: "q", limit: 5, categories: ["general"] }),
+  );
+  assert.equal(withoutEngines.get("engines"), null);
+  assert.equal(withoutEngines.get("categories"), "general");
+});

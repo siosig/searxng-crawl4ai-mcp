@@ -136,9 +136,6 @@ async function fetchPage(options: SearchOptions, pageno: number): Promise<Search
   if (options.language && options.language !== "auto") {
     url.searchParams.set("language", options.language);
   }
-  if (options.categories?.length) {
-    url.searchParams.set("categories", options.categories.join(","));
-  }
   // The narrowing parameters are set only when they were asked for, so a call
   // that omits all three sends byte-for-byte the request this client sent
   // before they existed. Sending a default instead would make "no preference"
@@ -146,6 +143,21 @@ async function fetchPage(options: SearchOptions, pageno: number): Promise<Search
   if (options.engines?.length) {
     // One comma-joined value; SearXNG does not read repeated `engines` keys.
     url.searchParams.set("engines", options.engines.join(","));
+
+    // `categories` is deliberately not sent alongside. SearXNG takes the union
+    // of the two, so naming an engine while also naming a category widens the
+    // selection back out instead of narrowing it - measured against a live
+    // instance: `engines=duckduckgo&categories=general` came back entirely from
+    // brave and google cse, while `engines=duckduckgo` alone restricted
+    // correctly and reported duckduckgo as refused.
+    //
+    // Since `categories` carries a default of ["general"], every call was
+    // sending it, and the engine list this tool advertises as a way to limit
+    // the search never limited anything. Between honouring the description and
+    // rewriting it, honouring it is the only option that leaves the tool
+    // telling the truth.
+  } else if (options.categories?.length) {
+    url.searchParams.set("categories", options.categories.join(","));
   }
   if (options.timeRange !== undefined) {
     url.searchParams.set("time_range", options.timeRange);

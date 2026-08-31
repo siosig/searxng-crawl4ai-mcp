@@ -30,7 +30,9 @@ const narrowing = {
   engines: z.array(z.string().min(1).max(48)).min(1).max(16).optional()
     .describe(
       'Limit the search to these engines by name, e.g. ["google", "duckduckgo"]. ' +
-        "Omit to use every engine the instance has enabled.",
+        "Omit to use every engine the instance has enabled. " +
+        "Takes precedence over `categories`: naming engines means only those, " +
+        "not those in addition to a category.",
     ),
   timeRange: z.enum(["day", "week", "month", "year"]).optional()
     .describe("Keep only results from within this period. Omit to search without a period filter."),
