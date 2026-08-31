@@ -91,6 +91,14 @@ services:
       PROXY_URL: ${PROXY_URL:-}
       SCRAPE_ALLOW_CIDRS: ${SCRAPE_ALLOW_CIDRS:-}
       MAX_CONCURRENT_FETCHES: ${MAX_CONCURRENT_FETCHES:-}
+      # Empty means the built-in default of three attempts. Set it to 1 to turn
+      # retrying off - the escape hatch for an operator who would rather see
+      # every transient upstream failure than have it absorbed.
+      #
+      # MCP_TRANSPORT is deliberately absent: this stack is the listener, and
+      # letting a deployment switch itself to stdio would leave the port
+      # published with nothing behind it.
+      RETRY_MAX_ATTEMPTS: ${RETRY_MAX_ATTEMPTS:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PORT: "3000"
     ports:

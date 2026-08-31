@@ -9,6 +9,12 @@ mcp_allowed_hosts: "localhost,127.0.0.1"
 # by running out of memory.
 mcp_max_concurrent_fetches: 2
 
+# Attempts against an upstream, including the first. Retrying only ever
+# absorbs failures that came back quickly and never adds more than two seconds
+# to a call, so the default is safe on a low-power host. Set it to 1 to switch
+# retrying off and see every transient failure as it happens.
+mcp_retry_max_attempts: 3
+
 mcp_log_level: info
 mcp_gemini_model: "gemini/gemini-flash-lite-latest"
 
