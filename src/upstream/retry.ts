@@ -220,7 +220,10 @@ export async function withRetry<T>(
       // earlier than we were told is the rudeness the budget check above was
       // written to avoid, and here it costs nothing to avoid it properly.
       const shortfall = waitMs - context.retryDelay;
-      if (shortfall > 0) await sleep(shortfall, undefined, { ref: false });
+      // Referenced, like the backoff itself. An unreferenced timer here would
+      // be the only handle left whenever nothing else is in flight, and the
+      // loop would drain in the middle of a call that is waiting to finish.
+      if (shortfall > 0) await sleep(shortfall);
 
       // Counted here, not in `onFailedAttempt`, because that hook runs before
       // this decision and would therefore count attempts that were only

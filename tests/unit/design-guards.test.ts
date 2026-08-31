@@ -163,3 +163,28 @@ test("the contract stack builds the code under test, and cannot pull instead", (
       "and a later deploy of that tag stops being the thing that was released",
   );
 });
+
+test("the retry path never detaches its timers from the event loop", () => {
+  // Written from two bugs with one shape. A backoff, and the extra wait a
+  // `Retry-After` asks for, are both the middle of a request someone is
+  // waiting on. Detached - `unref: true` on the p-retry options, `{ ref: false
+  // }` on a timers/promises sleep - each is the only handle left whenever
+  // nothing else is in flight, so the loop drains and the call is abandoned
+  // partway through.
+  //
+  // It fails silently: nothing throws, the promise simply never settles. The
+  // first version cost ten cancelled tests on CI while passing locally, and
+  // the fix in one place left the identical mistake standing in the other.
+  const retry = read(join(ROOT, "src/upstream/retry.ts"));
+
+  for (const pattern of [/\bunref\s*:\s*true/, /\bref\s*:\s*false/, /\.unref\s*\(/]) {
+    const offending = retry
+      .split("\n")
+      .filter((line) => pattern.test(line) && !line.trimStart().startsWith("//"));
+    assert.deepEqual(
+      offending,
+      [],
+      "a retry's waits must keep the process alive until the call it belongs to is done",
+    );
+  }
+});
