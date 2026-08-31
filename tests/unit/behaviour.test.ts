@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { Slots } from "../../src/utils/semaphore.js";
 import { truncate } from "../../src/utils/format.js";
 import { isAuthorized, isOriginAllowed, bearerToken } from "../../src/security/auth.js";
-import { UpstreamError, toFailure } from "../../src/utils/errors.js";
+import { UpstreamError, toFailure, failure, type ToolFailure } from "../../src/utils/errors.js";
+import { reply, replyFailure } from "../../src/tools/shared.js";
 import { CHARACTER_LIMIT } from "../../src/constants.js";
 
 test("over-budget fetches are refused, not queued", async () => {
@@ -89,4 +90,27 @@ test("connection problems are classified, not lumped together", () => {
 
   const aborted = Object.assign(new Error("aborted"), { name: "AbortError" });
   assert.equal(toFailure(aborted).kind, "timeout");
+});
+
+test("a failed call is marked as one, and a successful one is not", () => {
+  // Without `isError` the protocol reads a result as successful, so a body
+  // that says "Failed" would still arrive at the client as a success. This is
+  // the flag that makes the difference visible; the message alone does not.
+  const failed = replyFailure(failure("egressDenied", "nope"), "markdown");
+  assert.equal(failed.isError, true);
+  assert.equal(
+    (failed.structuredContent as { failure?: ToolFailure }).failure?.kind,
+    "egressDenied",
+  );
+
+  const ok = reply("all good", { results: [] }, "markdown");
+  assert.equal(ok.isError, undefined, "a successful result must not claim to be an error");
+});
+
+test("a partial batch is a successful call, not a failed one", () => {
+  // Some URLs failing is the answer to the question that was asked, not a
+  // failure to answer it. Marking it as an error would tell an agent to retry
+  // the whole call when the right move is to look at which URLs came back.
+  const partial = reply("1 of 2 pages fetched.", { documents: [{ status: "failed" }] }, "markdown");
+  assert.equal(partial.isError, undefined);
 });

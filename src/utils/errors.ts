@@ -32,7 +32,16 @@ export type FailureKind =
   | "upstreamUnavailable"
   /** No LLM credentials configured. Extraction degrades rather than fails. */
   | "llmUnavailable"
-  /** The arguments did not pass validation. */
+  /**
+   * An argument was well-formed but cannot be acted on - a URL that parses but
+   * is not crawlable, a job id that does not exist.
+   *
+   * Not for arguments of the wrong shape. The protocol splits those apart: a
+   * value that violates the advertised input schema is a malformed request and
+   * is answered with a JSON-RPC error before a tool ever runs, while something
+   * only this server can judge is a tool execution error and belongs here. The
+   * SDK enforces the first half; this kind is the second.
+   */
   | "invalidInput";
 
 export interface ToolFailure {

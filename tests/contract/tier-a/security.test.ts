@@ -58,3 +58,17 @@ test("a refusal is distinguishable from an unreachable host", async () => {
   assert.equal(a, "egressDenied");
   assert.equal(b, "unreachable");
 });
+
+test("a refusal reaches the client announced as a failure, not just described as one", async () => {
+  // The reason and the announcement are two different things. The body has
+  // said "Failed (egressDenied)" since this server was written, but without
+  // `isError` the protocol reads the whole call as successful - "if not set,
+  // the call is assumed to be successful" - so a client had no way to surface
+  // it as a failure. This asserts the flag survives the wire.
+  const denied = await client.call("web_scrape", { url: "http://169.254.169.254/latest/meta-data/" });
+  assert.equal(denied.isError, true, "a refused fetch must be marked as an error");
+
+  // And the converse, so this cannot be satisfied by marking everything.
+  const fine = await client.call("web_scrape", { url: `${FIXTURE}/index.html` });
+  assert.equal(fine.isError, undefined, "a successful fetch must not claim to be an error");
+});

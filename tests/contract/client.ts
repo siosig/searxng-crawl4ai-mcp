@@ -17,6 +17,14 @@ const META = {
 export interface ToolResult {
   readonly text: string;
   readonly structured: Record<string, unknown>;
+  /**
+   * Whether the call reported itself as failed.
+   *
+   * Absent means the protocol read the call as successful, so this is
+   * what has to be checked to know a failure was actually announced as
+   * one rather than merely described in the text.
+   */
+  readonly isError: boolean | undefined;
 }
 
 export class McpClient {
@@ -72,10 +80,12 @@ export class McpClient {
     const result = res.result as {
       content?: { text?: string }[];
       structuredContent?: Record<string, unknown>;
+      isError?: boolean;
     };
     return {
       text: result.content?.[0]?.text ?? "",
       structured: result.structuredContent ?? {},
+      isError: result.isError,
     };
   }
 

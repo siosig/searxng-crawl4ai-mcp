@@ -57,10 +57,25 @@ export function reply(
   };
 }
 
-/** Report a failure as a normal result. Tools do not throw at the caller. */
+/**
+ * Report a failure as a result rather than a thrown error.
+ *
+ * `isError` is what makes the result legible *as* a failure. The protocol
+ * treats a result without it as a successful call - "If not set, the call is
+ * assumed to be successful" - so a body that merely reads "Failed: ..." arrives
+ * at the client as a success whose text happens to be discouraging. Setting it
+ * is what lets a client surface the call as failed and lets a model recognise
+ * that it should try something else.
+ *
+ * The flag belongs here and only here. A batch in which some URLs could not be
+ * fetched is *not* a failed call: it did the work it was asked to do and is
+ * reporting per-URL outcomes, so those stay inside an ordinary result. What
+ * this function marks is the other thing - the whole call could not be carried
+ * out.
+ */
 export function replyFailure(f: ToolFailure, format: Format): CallToolResult {
   const markdown = `**Failed (${f.kind})**: ${f.message}`;
-  return reply(markdown, { status: "failed", failure: f }, format);
+  return { ...reply(markdown, { status: "failed", failure: f }, format), isError: true };
 }
 
 /**
