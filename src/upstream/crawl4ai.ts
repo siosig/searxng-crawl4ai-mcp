@@ -161,6 +161,8 @@ export async function crawl(urls: readonly string[]): Promise<FetchedDocument[]>
     method: "POST",
     token: token(),
     body: { urls: [...urls] },
+    upstream: "crawl4ai",
+    operation: "crawl",
   });
 
   const rawResults = Array.isArray(body.results)
@@ -197,7 +199,7 @@ export async function crawl(urls: readonly string[]): Promise<FetchedDocument[]>
 export async function getMarkdown(url: string): Promise<FetchedDocument> {
   const { body } = await request<{ markdown?: unknown; success?: unknown }>(
     base("/md"),
-    { method: "POST", token: token(), body: { url } },
+    { method: "POST", token: token(), body: { url }, upstream: "crawl4ai", operation: "markdown" },
   );
 
   const markdown = markdownOf(body.markdown);
@@ -231,6 +233,8 @@ export async function submitCrawlJob(urls: readonly string[]): Promise<string> {
     token: token(),
     body: { urls: [...urls] },
     expect: [202],
+    upstream: "crawl4ai",
+    operation: "submit_job",
   });
 
   const id = str(body.task_id);
@@ -266,7 +270,7 @@ function jobState(status: string): JobState {
 export async function getJobStatus(jobId: string): Promise<CrawlJob> {
   const { body } = await request<RawJobStatus>(
     base(`/crawl/job/${encodeURIComponent(jobId)}`),
-    { method: "GET", token: token() },
+    { method: "GET", token: token(), upstream: "crawl4ai", operation: "job_status" },
   ).catch((error: unknown) => {
     // An unknown id is a caller mistake, not an upstream fault. Reporting it
     // as an HTTP error would send the agent looking for an outage.
@@ -323,6 +327,8 @@ export async function extract(url: string, instruction: string): Promise<unknown
     method: "GET",
     token: token(),
     timeoutMs: 180_000,
+    upstream: "crawl4ai",
+    operation: "extract",
   });
   return body;
 }

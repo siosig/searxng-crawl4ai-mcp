@@ -80,6 +80,26 @@ const EnvSchema = z.object({
   LOG_LEVEL: z
     .enum(["trace", "debug", "info", "warn", "error", "fatal"])
     .default("info"),
+
+  // Metrics are entirely optional. Unset means no metrics listener is created
+  // at all - not "created but idle" - so a deployment with no monitoring
+  // stack opens no extra port and pays nothing. Nothing else in the server
+  // depends on this being set.
+  METRICS_PORT: z.coerce.number().int().min(1).max(65535).optional(),
+
+  // Where the metrics listener binds.
+  //
+  // The default is loopback, which is right when this process runs directly on
+  // a host. Inside a container it is wrong: a container's loopback is its own,
+  // so a collector on the host cannot reach it - verified by trying, and the
+  // connection is reset. There, the isolation comes from publishing the port to
+  // the host's loopback only, and the process binds all interfaces so that
+  // publishing has something to forward to.
+  //
+  // Left configurable rather than guessed, because detecting "am I in a
+  // container?" is exactly the kind of implicit assumption that breaks on a
+  // machine unlike the one it was written on.
+  METRICS_HOST: z.string().min(1).default("127.0.0.1"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

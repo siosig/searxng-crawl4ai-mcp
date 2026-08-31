@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { SearchInput } from "../schemas/tools.js";
 import { search } from "../upstream/searxng.js";
 import { ANNOTATIONS, guarded, reply, cell } from "./shared.js";
+import { recordSearch } from "../metrics/record.js";
 import type { SearchResult } from "../upstream/types.js";
 
 function toMarkdown(r: SearchResult): string {
@@ -59,6 +60,9 @@ export function registerSearchTool(server: McpServer): void {
           language: params.language,
           categories: params.categories,
         });
+        // Hit count and engine failures go in together: an empty result set
+        // only means something alongside whether any engine refused to answer.
+        recordSearch(result.results.length, result.unresponsiveEngines);
         return reply(toMarkdown(result), { ...result }, params.format);
       }),
   );

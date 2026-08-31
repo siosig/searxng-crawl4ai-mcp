@@ -1,4 +1,13 @@
 ---
+# One place decides which compose files are in play, so pull, up and the
+# restart handler cannot drift apart and fight over the metrics overlay.
+- name: Decide which compose files apply
+  ansible.builtin.set_fact:
+    mcp_compose_files: >-
+      -f compose.yaml{{ ' -f compose.metrics.yaml'
+        if mcp_metrics_port | default('') | string | length > 0 else '' }}
+  tags: [mcp_stack, configure, deploy]
+
 - name: Ensure the deployment directory exists
   ansible.builtin.file:
     path: "{{ mcp_deploy_dir }}"
@@ -23,6 +32,17 @@
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../docker/compose.yaml"
     dest: "{{ mcp_deploy_dir }}/compose.yaml"
+    owner: root
+    group: root
+    mode: '0640'
+  become: true
+  notify: Restart the MCP stack
+  tags: [mcp_stack, configure]
+
+- name: Copy the metrics compose overlay
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../docker/compose.metrics.yaml"
+    dest: "{{ mcp_deploy_dir }}/compose.metrics.yaml"
     owner: root
     group: root
     mode: '0640'
@@ -85,7 +105,7 @@
   ansible.builtin.command:
     cmd: >-
       docker compose --env-file versions.env --env-file .env
-      -f compose.yaml pull --quiet
+      {{ mcp_compose_files }} pull --quiet
     chdir: "{{ mcp_deploy_dir }}"
   become: true
   register: mcp_pull
@@ -97,7 +117,7 @@
   ansible.builtin.command:
     cmd: >-
       docker compose --env-file versions.env --env-file .env
-      -f compose.yaml up -d --remove-orphans --wait --wait-timeout 300
+      {{ mcp_compose_files }} up -d --remove-orphans --wait --wait-timeout 300
     chdir: "{{ mcp_deploy_dir }}"
   become: true
   register: mcp_up

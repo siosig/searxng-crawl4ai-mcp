@@ -4,12 +4,14 @@ import { search } from "../upstream/searxng.js";
 import { crawl } from "../upstream/crawl4ai.js";
 import {
   ANNOTATIONS,
+  countDocuments,
   documentsMarkdown,
   fetchSlots,
   guarded,
   partitionByEgress,
   reply,
 } from "./shared.js";
+import { recordSearch } from "../metrics/record.js";
 import type { FetchedDocument } from "../upstream/types.js";
 
 /**
@@ -64,6 +66,9 @@ export function registerSearchAndScrapeTool(server: McpServer): void {
             }
           );
         });
+
+        recordSearch(result.results.length, result.unresponsiveEngines);
+        countDocuments(documents);
 
         const engineNote = result.unresponsiveEngines.length
           ? `\n\n_Engines that did not answer: ${result.unresponsiveEngines

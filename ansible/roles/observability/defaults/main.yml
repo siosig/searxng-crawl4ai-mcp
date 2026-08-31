@@ -1,0 +1,30 @@
+---
+# Everything here is skipped when the target has no monitoring stack. The
+# server does not depend on any of it, so neither does a successful deploy.
+
+# Where this host's collector takes per-service drop-ins. When this directory
+# does not exist, the whole role is skipped.
+observability_alloy_config_dir: /etc/alloy/config.d
+# Numeric prefix orders the drop-ins; the name identifies the owner.
+observability_alloy_filename: 23-searxng-crawl4ai-mcp.alloy
+
+# Where provisioned dashboards are read from. Skipped when absent.
+observability_dashboard_dir: /var/lib/grafana/dashboards/services
+observability_dashboard_filename: searxng-crawl4ai-mcp.json
+
+# The label that identifies this stack's metrics and logs among everything
+# else on the host.
+observability_job: searxng-crawl4ai-mcp
+
+# The metrics endpoint, on the host's loopback. The container binds all
+# interfaces internally and publishes only here - see docker/compose.metrics.yaml.
+observability_metrics_port: 9464
+observability_metrics_address: "127.0.0.1:{{ observability_metrics_port }}"
+observability_scrape_interval: 15s
+
+# Which containers' journal entries belong to this stack. Deliberately not
+# "every container on the host".
+observability_container_regex: "searxng-crawl4ai-mcp-(mcp|searxng|crawl4ai)-[0-9]+"
+
+# The user the collector runs as, used only to check journal access.
+observability_collector_user: alloy

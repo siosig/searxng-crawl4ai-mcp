@@ -1,0 +1,22 @@
+# Metrics, as a separate overlay.
+#
+# This is not in the base topology on purpose. A deployment with no monitoring
+# stack should open no extra port at all, and a compose `ports` entry publishes
+# a host-side listener whether or not anything is behind it - an empty variable
+# does not make the entry disappear. Keeping the whole thing in an overlay that
+# is simply not included is the only way "no metrics" really means no port.
+#
+#   docker compose --env-file versions.env --env-file .env \
+#     -f docker/compose.yaml -f docker/compose.metrics.yaml up -d
+
+services:
+  mcp:
+    environment:
+      METRICS_PORT: ${METRICS_PORT:-9464}
+      # All interfaces *inside the container*. A container's loopback is its
+      # own, so a collector running on the host cannot reach 127.0.0.1 in here -
+      # the connection is reset. What keeps this off the network is the port
+      # mapping below, which publishes to the host's loopback only.
+      METRICS_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:${METRICS_PORT:-9464}:${METRICS_PORT:-9464}"

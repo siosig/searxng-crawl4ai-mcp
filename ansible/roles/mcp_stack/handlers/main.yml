@@ -3,7 +3,7 @@
   ansible.builtin.command:
     cmd: >-
       docker compose --env-file versions.env --env-file .env
-      -f compose.yaml up -d --remove-orphans --wait --wait-timeout 300
+      {{ mcp_compose_files }} up -d --remove-orphans --wait --wait-timeout 300
     chdir: "{{ mcp_deploy_dir }}"
   become: true
   changed_when: true

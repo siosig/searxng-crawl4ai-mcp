@@ -1,4 +1,5 @@
 import { failure, UpstreamError, toFailure } from "../utils/errors.js";
+import { recordUpstream, type Upstream, type UpstreamOperation } from "../metrics/record.js";
 
 /**
  * The only place in this codebase that speaks HTTP to an upstream service.
@@ -20,6 +21,17 @@ import { failure, UpstreamError, toFailure } from "../utils/errors.js";
  */
 
 export interface RequestOptions {
+  /**
+   * Which upstream this call is for, and what it is doing.
+   *
+   * Recorded so a slow tool can be split into "we were slow" and "we were
+   * waiting". Subtracting this from the tool duration is the whole of the
+   * latency-isolation story, and is why the upstreams' own metrics endpoints
+   * are not scraped: they answer the same question from the other side, and
+   * reaching them would put a credential into the collector's config.
+   */
+  readonly upstream?: Upstream;
+  readonly operation?: UpstreamOperation;
   readonly method?: "GET" | "POST";
   readonly body?: unknown;
   readonly token?: string;
@@ -54,10 +66,19 @@ export async function request<T>(
   };
   if (body !== undefined) init.body = JSON.stringify(body);
 
+  const started = process.hrtime.bigint();
+  const elapsed = (): number => Number(process.hrtime.bigint() - started) / 1e9;
+  const measure = (outcome: "success" | "failure"): void => {
+    if (options.upstream && options.operation) {
+      recordUpstream(options.upstream, options.operation, outcome, elapsed());
+    }
+  };
+
   let response: Response;
   try {
     response = await fetch(url, init);
   } catch (error) {
+    measure("failure");
     throw new UpstreamError(toFailure(error));
   }
 
@@ -66,6 +87,7 @@ export async function request<T>(
     (options.expect?.includes(response.status) ?? false);
 
   if (!ok) {
+    measure("failure");
     const detail = await response.text().catch(() => "");
     throw new UpstreamError(
       failure(
@@ -77,6 +99,8 @@ export async function request<T>(
       ),
     );
   }
+
+  measure("success");
 
   let parsed: T;
   try {

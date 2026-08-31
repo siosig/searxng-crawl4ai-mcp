@@ -3,6 +3,7 @@ import { CrawlInput } from "../schemas/tools.js";
 import { crawl } from "../upstream/crawl4ai.js";
 import {
   ANNOTATIONS,
+  countDocuments,
   documentsMarkdown,
   egressGuard,
   fetchSlots,
@@ -98,6 +99,7 @@ export function registerCrawlTool(server: McpServer): void {
           for (let i = 0; i < level.length; i += BATCH) {
             const batch = level.slice(i, i + BATCH);
             const fetched = await fetchSlots().run(() => crawl(batch));
+            countDocuments(fetched);
             documents.push(...fetched);
 
             if (depth < params.maxDepth) {

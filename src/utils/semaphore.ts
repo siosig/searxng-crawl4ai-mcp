@@ -1,4 +1,5 @@
 import { failure, UpstreamError } from "./errors.js";
+import { recordConcurrencyRejection, recordSlots } from "../metrics/record.js";
 
 /**
  * A fixed number of fetch slots.
@@ -34,6 +35,7 @@ export class Slots {
    */
   async run<T>(work: () => Promise<T>): Promise<T> {
     if (this.#inUse >= this.#limit) {
+      recordConcurrencyRejection();
       throw new UpstreamError(
         failure(
           "concurrencyLimit",
@@ -43,10 +45,12 @@ export class Slots {
     }
 
     this.#inUse += 1;
+    recordSlots(this.#inUse, this.#limit);
     try {
       return await work();
     } finally {
       this.#inUse -= 1;
+      recordSlots(this.#inUse, this.#limit);
     }
   }
 }

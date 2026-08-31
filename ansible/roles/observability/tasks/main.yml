@@ -1,0 +1,90 @@
+---
+# Metrics collection and a dashboard, added to whatever the host already runs.
+#
+# Every task here is conditional on the target directory existing. A host with
+# no monitoring stack gets none of this and deploys successfully - metrics are
+# an optional extra, and a deploy that fails because Grafana is absent would
+# make them a dependency instead.
+
+- name: Look for the collector's drop-in directory
+  ansible.builtin.stat:
+    path: "{{ observability_alloy_config_dir }}"
+  register: alloy_dir
+  become: true
+  tags: [observability]
+
+- name: Look for the dashboard directory
+  ansible.builtin.stat:
+    path: "{{ observability_dashboard_dir }}"
+  register: dashboard_dir
+  become: true
+  tags: [observability]
+
+- name: Report what will be skipped
+  ansible.builtin.debug:
+    msg: >-
+      No monitoring stack found on this host
+      ({{ observability_alloy_config_dir }}
+      {{ 'exists' if alloy_dir.stat.isdir | default(false) else 'is missing' }},
+      {{ observability_dashboard_dir }}
+      {{ 'exists' if dashboard_dir.stat.isdir | default(false) else 'is missing' }}).
+      Skipping metrics collection. The server itself is unaffected.
+  when: not (alloy_dir.stat.isdir | default(false)) or not (dashboard_dir.stat.isdir | default(false))
+  tags: [observability]
+
+# One file, named after this project. Nothing touches the collector's central
+# configuration or any other service's drop-in.
+- name: Install the collector drop-in
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../observability/alloy/{{ observability_alloy_filename }}.j2"
+    dest: "{{ observability_alloy_config_dir }}/{{ observability_alloy_filename }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: alloy_dir.stat.isdir | default(false)
+  notify: Reload the collector
+  tags: [observability]
+
+- name: Install the dashboard
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../observability/dashboards/{{ observability_dashboard_filename }}"
+    dest: "{{ observability_dashboard_dir }}/{{ observability_dashboard_filename }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: dashboard_dir.stat.isdir | default(false)
+  tags: [observability]
+
+# The drop-in reads the journal, which is not readable by every service user.
+# Checked rather than assumed: this host had no journal-reading drop-in before,
+# so there was no precedent to inherit.
+# Reading the journal is not something every service user can do, and this
+# host had no journal-reading drop-in before, so there was no precedent to
+# inherit. `check_mode: false` because the check is read-only and a dry run
+# that skips it would report on an empty string and cry wolf.
+- name: Confirm the collector can read the journal
+  ansible.builtin.command:
+    cmd: id -nG {{ observability_collector_user }}
+  become: true
+  register: alloy_groups
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: alloy_dir.stat.isdir | default(false)
+  tags: [observability]
+
+- name: Warn when the collector may not be able to read the journal
+  ansible.builtin.debug:
+    msg: >-
+      The collector user {{ observability_collector_user }} is not in
+      systemd-journal (groups: {{ alloy_groups.stdout | default('') }}).
+      Metrics will still arrive; log lines may not. Add the user to that group
+      if logs do not appear.
+  when:
+    - alloy_dir.stat.isdir | default(false)
+    - alloy_groups.stdout is defined
+    - alloy_groups.stdout | length > 0
+    - "'systemd-journal' not in alloy_groups.stdout"
+  tags: [observability]

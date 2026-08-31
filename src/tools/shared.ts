@@ -7,6 +7,7 @@ import { Slots } from "../utils/semaphore.js";
 import { logger } from "../utils/logger.js";
 import type { FetchedDocument } from "../upstream/types.js";
 import type { Format } from "../schemas/tools.js";
+import { recordToolCall, recordDocuments } from "../metrics/record.js";
 
 /**
  * Machinery shared by every tool: the fetch budget, the outbound check, and a
@@ -64,13 +65,35 @@ export async function guarded(
   format: Format,
   body: () => Promise<CallToolResult>,
 ): Promise<CallToolResult> {
+  // Every tool goes through here, so this is the one place that needs to know
+  // how a call is measured. Adding a tool cannot forget to be counted.
+  const started = process.hrtime.bigint();
+  const elapsed = (): number => Number(process.hrtime.bigint() - started) / 1e9;
+
   try {
-    return await body();
+    const result = await body();
+    // A tool that reported a failure as a value is a failure, even though
+    // nothing was thrown. Counting it as a success would make the dashboard
+    // claim everything is fine while every fetch is being refused.
+    const failure = (result.structuredContent as { failure?: ToolFailure | null } | undefined)
+      ?.failure;
+    if (failure) {
+      recordToolCall(name, "failure", elapsed(), failure.kind);
+    } else {
+      recordToolCall(name, "success", elapsed(), null);
+    }
+    return result;
   } catch (error) {
     const f = toFailure(error);
+    recordToolCall(name, "failure", elapsed(), f.kind);
     logger.warn({ tool: name, kind: f.kind, status: f.upstreamStatus }, "tool failed");
     return replyFailure(f, format);
   }
+}
+
+/** Count fetch outcomes per URL, which is a different question from per call. */
+export function countDocuments(docs: readonly FetchedDocument[]): void {
+  recordDocuments(docs.map((d) => (d.status === "ok" ? "ok" : "failed")));
 }
 
 /**

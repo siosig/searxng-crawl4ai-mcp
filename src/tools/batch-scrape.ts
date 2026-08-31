@@ -3,6 +3,7 @@ import { BatchScrapeInput } from "../schemas/tools.js";
 import { crawl } from "../upstream/crawl4ai.js";
 import {
   ANNOTATIONS,
+  countDocuments,
   documentsMarkdown,
   fetchSlots,
   guarded,
@@ -63,6 +64,8 @@ export function registerBatchScrapeTool(server: McpServer): void {
             }
           );
         });
+
+        countDocuments(documents);
 
         const okCount = documents.filter((d) => d.status === "ok").length;
         return reply(

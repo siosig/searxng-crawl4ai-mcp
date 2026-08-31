@@ -18,3 +18,8 @@ mcp_scrape_allow_cidrs: ""
 
 # Path to the local .env holding the Gemini key, relative to the playbook.
 mcp_local_env_file: "{{ playbook_dir }}/../.env"
+
+# Metrics. Empty means the metrics overlay is not used at all, so no listener
+# is created and no extra port is published - which is what a host with no
+# monitoring stack should get.
+mcp_metrics_port: ""

@@ -1,0 +1,63 @@
+// ==========================================
+// searxng-crawl4ai-mcp — metrics and logs
+//
+// Managed by the searxng-crawl4ai-mcp repository's Ansible role
+// (observability). Do not edit by hand; changes are overwritten.
+//
+// Two rules this file follows, both taken from the other drop-ins on this
+// host rather than invented here:
+//
+//   1. No remote_write of its own. Everything forwards into the shared
+//      components that 00-main.alloy provides, so there is one place that
+//      decides where data goes.
+//   2. No credentials. Nothing in this file is a secret, which is why the
+//      metrics endpoint is unauthenticated and reachable only from loopback.
+// ==========================================
+
+// --- Metrics ---------------------------------------------------------------
+// The MCP server publishes on the host's loopback. It is not authenticated,
+// because nothing off this host can route to it.
+prometheus.scrape "searxng_crawl4ai_mcp" {
+  targets = [
+    { "__address__" = "{{ observability_metrics_address }}" },
+  ]
+  scrape_interval = "{{ observability_scrape_interval }}"
+  job_name        = "{{ observability_job }}"
+  forward_to      = [prometheus.relabel.drop_metrics.receiver]
+}
+
+// --- Logs ------------------------------------------------------------------
+// The stack's containers log through the journald driver, so their output is
+// already in the journal - the server needs no shipping configuration of its
+// own, which is what keeps it able to run with no monitoring stack at all.
+//
+// The keep rule below is what stops this from collecting every container on
+// the host: only this stack's containers are forwarded.
+loki.relabel "searxng_crawl4ai_mcp_journal" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__journal_container_name"]
+    regex         = "{{ observability_container_regex }}"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__journal_container_name"]
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+}
+
+loki.source.journal "searxng_crawl4ai_mcp" {
+  forward_to    = [loki.write.default.receiver]
+  relabel_rules = loki.relabel.searxng_crawl4ai_mcp_journal.rules
+  labels        = {
+    job          = "{{ observability_job }}",
+    service_name = "searxng-crawl4ai-mcp",
+  }
+}

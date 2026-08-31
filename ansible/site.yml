@@ -20,6 +20,10 @@
     - role: mcp_stack
     - role: egress_guard
     - role: nginx_proxy
+    # Last, and unable to take the rest down with it. Metrics are an optional
+    # extra: a host with no monitoring stack skips this entirely and still
+    # deploys, and a failure here must not leave the server undeployed.
+    - role: observability
 
   post_tasks:
     - name: Report where the stack is reachable
@@ -27,4 +31,7 @@
         msg: >-
           MCP stack is up on port {{ mcp_port }} (loopback), proxied at
           {{ nginx_proxy_location }}.
+          Metrics: {{ 'on, at ' ~ observability_metrics_address
+                      if mcp_metrics_port | default('') | string | length > 0
+                      else 'off (set mcp_metrics_port to enable)' }}.
       tags: [always]

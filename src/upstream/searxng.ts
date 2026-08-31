@@ -106,6 +106,8 @@ export async function search(options: SearchOptions): Promise<SearchResult> {
   const { body, status } = await request<RawSearxngResponse>(url.toString(), {
     method: "GET",
     timeoutMs: 30_000,
+    upstream: "searxng",
+    operation: "search",
   }).catch((error: unknown) => {
     // A 403 here almost always means one thing, and saying so saves an
     // operator a long detour: `search.formats` has no environment-variable

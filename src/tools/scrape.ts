@@ -3,6 +3,7 @@ import { ScrapeInput } from "../schemas/tools.js";
 import { getMarkdown } from "../upstream/crawl4ai.js";
 import {
   ANNOTATIONS,
+  countDocuments,
   documentMarkdown,
   egressGuard,
   fetchSlots,
@@ -30,6 +31,7 @@ export function registerScrapeTool(server: McpServer): void {
         if (denied) return replyFailure(denied, params.format);
 
         const doc = await fetchSlots().run(() => getMarkdown(params.url));
+        countDocuments([doc]);
         return reply(documentMarkdown(doc), { ...doc }, params.format);
       }),
   );
