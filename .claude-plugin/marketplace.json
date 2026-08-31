@@ -1,0 +1,16 @@
+{
+  "name": "searxng-crawl4ai-mcp",
+  "owner": {
+    "name": "self-hosted"
+  },
+  "description": "Self-hosted web search and page fetching over SearXNG and Crawl4AI.",
+  "plugins": [
+    {
+      "name": "searxng-crawl4ai-mcp",
+      "source": "./plugins/searxng-crawl4ai-mcp",
+      "description": "Search the web and read pages through your own SearXNG and Crawl4AI. Prefer over WebFetch for reading web pages.",
+      "category": "web",
+      "keywords": ["searxng", "crawl4ai", "search", "scraping", "mcp", "self-hosted"]
+    }
+  ]
+}

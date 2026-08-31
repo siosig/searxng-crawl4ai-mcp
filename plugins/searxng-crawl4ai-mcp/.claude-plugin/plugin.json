@@ -1,0 +1,25 @@
+{
+  "name": "searxng-crawl4ai-mcp",
+  "version": "0.1.0",
+  "description": "Self-hosted web search and page fetching. Talks to your own SearXNG and Crawl4AI through a remote MCP server, so no request leaves your infrastructure for a commercial API. Prefer over WebFetch when reading web pages.",
+  "author": {
+    "name": "self-hosted"
+  },
+  "license": "MIT",
+  "keywords": ["searxng", "crawl4ai", "search", "web-scraping", "mcp", "webfetch"],
+  "userConfig": {
+    "endpoint": {
+      "type": "string",
+      "title": "MCP endpoint URL",
+      "description": "Full URL of your deployed endpoint, including the path. Example: https://mcp.example.com/mcp-searxng-crawl4ai",
+      "required": true
+    },
+    "token": {
+      "type": "string",
+      "title": "Access token",
+      "description": "The bearer token the endpoint enforces (MCP_AUTH_TOKEN).",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}
