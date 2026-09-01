@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
 import { buildServer, TOOL_NAMES } from "../../src/server.js";
 
@@ -11,13 +12,24 @@ import { buildServer, TOOL_NAMES } from "../../src/server.js";
  * ones a well-meaning change would otherwise erode quietly.
  */
 
-const ROOT = new URL("../../", import.meta.url).pathname;
+// `.pathname` off a file URL is a URL path, not a filesystem one: on Windows
+// it comes back as "/D:/...", and joining that produces "D:\D:\..." so every
+// guard below fails to open the file it is about. The rest of the suite
+// already converts properly - tests/unit/env.test.ts, tier-a/stdio.test.ts.
+//
+// Separators are then forced to "/" here and in walk(), because the guards
+// exclude directories by writing them out - `!p.includes("/tests/")`, the
+// same for "/upstream/". Against a backslash path those read as "exclude
+// nothing", so on Windows the guards were reporting the test files that
+// deliberately name the forbidden symbols, and the one directory allowed to
+// speak HTTP, as violations of themselves. Node opens either form.
+const ROOT = fileURLToPath(new URL("../../", import.meta.url)).replaceAll("\\", "/");
 
 function walk(dir: string, filter: (p: string) => boolean): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
     if (["node_modules", "dist", ".git", "tmp", "specs", ".specify"].includes(entry)) continue;
-    const full = join(dir, entry);
+    const full = join(dir, entry).replaceAll("\\", "/");
     if (statSync(full).isDirectory()) out.push(...walk(full, filter));
     else if (filter(full)) out.push(full);
   }
@@ -187,4 +199,43 @@ test("the retry path never detaches its timers from the event loop", () => {
       "a retry's waits must keep the process alive until the call it belongs to is done",
     );
   }
+});
+
+test("the SearXNG settings switch engines on and off, and define none of them", () => {
+  // Written from a live failure rather than a worry. Upstream enables four
+  // general web engines and ships google and bing off; on this deployment's
+  // egress two of the four cannot answer at all - startpage returns a
+  // country block, duckduckgo a bot challenge - so every search ran on
+  // `google cse` alone while reporting three engines as unresponsive. Which
+  // engines run therefore has to be stated here, because no environment
+  // variable reaches it.
+  //
+  // Stating which is the whole of the licence. A definition copied into this
+  // file - `engine:`, a `base_url:`, a category list - freezes upstream's
+  // idea of how that engine is queried at the version it was copied from,
+  // and quietly reintroduces exactly what `use_default_settings` is here to
+  // prevent. The next release would keep fixing the engine while this
+  // deployment kept querying it the old way.
+  const settings = read(join(ROOT, "docker/searxng/settings.yml"));
+  assert.match(
+    settings,
+    /^use_default_settings:\s*true\s*$/m,
+    "the instance must keep inheriting upstream's engine definitions",
+  );
+
+  const section = /^engines:\s*$/m.exec(settings);
+  assert.ok(section, "no engines section; the deployment is back on upstream's defaults");
+
+  const body = settings
+    .slice(section.index + section[0].length)
+    .split("\n")
+    .filter((line) => /^\s+\S/.test(line));
+  assert.ok(body.length > 0, "the engines section is empty");
+
+  const keys = body.flatMap((line) => /^\s*-?\s*([a-z_]+):/.exec(line)?.[1] ?? []);
+  assert.deepEqual(
+    [...new Set(keys)].filter((key) => key !== "name" && key !== "disabled").sort(),
+    [],
+    "only `name` and `disabled` belong here; any other key freezes an upstream engine definition",
+  );
 });

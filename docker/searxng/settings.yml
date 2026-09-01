@@ -22,3 +22,51 @@ search:
   formats:
     - html
     - json
+
+# Which engines run. Nothing here defines an engine; each entry flips the
+# `disabled` flag on a definition that stays upstream's, so a new release still
+# decides what these engines are and how they are queried.
+#
+# The section exists because upstream's defaults do not survive contact with
+# this deployment. Upstream enables four general web engines - brave,
+# duckduckgo, google cse and startpage - and ships google and bing switched
+# off. Measured against this deployment's own egress on 2026-09-01, by asking
+# the running instance for one engine at a time
+# (`/search?format=json&engines=<name>`):
+#
+#   startpage       answered every request with /sp/captcha-block?bc=JP. Same
+#                   answer for SearXNG's user agent and a current Chrome one,
+#                   and over both HTTP/1.1 and h2, so it is a block on the
+#                   egress country rather than anything about the request.
+#                   Nothing in this file can lift it. PROXY_URL can: compose
+#                   passes it to this container as HTTP(S)_PROXY, so a relay
+#                   outside JP is the one thing that makes startpage usable
+#                   here - flip it back on at the same time.
+#   duckduckgo      answered HTTP 202 with a challenge form. SearXNG's user
+#                   agent pool (searx/data/useragents.json) carries Firefox
+#                   builds only and search/processors/online.py sets the header
+#                   unconditionally, so no setting reaches it. `duckduckgo web`
+#                   is the same operator over a different endpoint and answers
+#                   normally, so that is the one that runs.
+#   brave           429s intermittently, after which SearXNG suspends it for
+#                   180s - but it returned a full page when asked on its own.
+#                   Left enabled: an engine that works some of the time is
+#                   worth more than the failure it reports the rest of it.
+#   google, bing    both returned results here. They were off only because
+#                   upstream ships them off.
+#
+# Leaving this to the defaults left a metasearch running on `google cse` alone,
+# with three of its four engines failing on every query. These are measurements
+# and they can go stale: re-run the per-engine query above before trusting any
+# line of it.
+engines:
+  - name: google
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: duckduckgo web
+    disabled: false
+  - name: duckduckgo
+    disabled: true
+  - name: startpage
+    disabled: true
