@@ -145,6 +145,28 @@ deployment.
 idempotent and pulls prebuilt images; it never builds on the target, which
 matters when that target is a low-power machine.
 
+## Connecting Claude Code
+
+Two installers register this checkout with Claude Code as a plugin. Neither
+builds anything: the plugin only tells Claude Code where the endpoint is and
+which bearer token to present, then allows the eight tools without a prompt.
+Both read `MCP_PUBLIC_ENDPOINT` and `MCP_PUBLIC_AUTH_TOKEN` (falling back to
+`MCP_AUTH_TOKEN`) from the gitignored `.env`.
+
+```sh
+# Linux / macOS
+./install_claude_plugin.sh
+```
+
+```powershell
+# Windows - needs PowerShell 7 (pwsh), not Windows PowerShell 5.1
+pwsh -ExecutionPolicy Bypass -File .\install_claude_plugin.ps1
+```
+
+`-ExecutionPolicy Bypass` matters when the checkout sits on a network share or
+came in as a download, where `RemoteSigned` refuses to run it. Restart Claude
+Code afterwards.
+
 ## Development
 
 ```sh

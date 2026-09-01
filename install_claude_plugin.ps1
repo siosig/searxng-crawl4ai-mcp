@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Register this checkout with Claude Code as a plugin.
@@ -25,7 +26,7 @@
     Overrides MCP_PUBLIC_ENDPOINT from .env.
 
 .PARAMETER Token
-    Overrides MCP_AUTH_TOKEN from .env.
+    Overrides MCP_PUBLIC_AUTH_TOKEN (or MCP_AUTH_TOKEN) from .env.
 
 .PARAMETER Scope
     user, project or local. Defaults to user.
@@ -38,6 +39,14 @@
 
 .EXAMPLE
     ./install_claude_plugin.ps1 -Endpoint 'https://mcp.example.com/mcp-searxng-crawl4ai'
+
+.EXAMPLE
+    pwsh -ExecutionPolicy Bypass -File .\install_claude_plugin.ps1
+
+.NOTES
+    Needs PowerShell 7 (pwsh). Windows PowerShell 5.1 lacks -SkipHttpErrorCheck
+    and writes UTF-8 with a BOM, which Claude Code's settings.json must not have;
+    the #Requires line above turns both into one clear error instead.
 #>
 [CmdletBinding()]
 param(
