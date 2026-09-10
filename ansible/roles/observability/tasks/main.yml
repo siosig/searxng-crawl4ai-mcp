@@ -1,10 +1,16 @@
 ---
-# Metrics collection and a dashboard, added to whatever the host already runs.
+# Metrics collection, added to whatever the host already runs.
 #
 # Every task here is conditional on the target directory existing. A host with
 # no monitoring stack gets none of this and deploys successfully - metrics are
-# an optional extra, and a deploy that fails because Grafana is absent would
-# make them a dependency instead.
+# an optional extra, and a deploy that fails because the collector is absent
+# would make them a dependency instead.
+#
+# The Grafana dashboard is deliberately not installed from here. The host's
+# Grafana owns its dashboard directory with an `rsync --delete`, so a file
+# written by this role lives only until that playbook next runs - which is how
+# the dashboard disappeared on 2026-09-01. It is kept in the repository that
+# owns the host's Grafana instead.
 
 - name: Look for the collector's drop-in directory
   ansible.builtin.stat:
@@ -13,23 +19,13 @@
   become: true
   tags: [observability]
 
-- name: Look for the dashboard directory
-  ansible.builtin.stat:
-    path: "{{ observability_dashboard_dir }}"
-  register: dashboard_dir
-  become: true
-  tags: [observability]
-
 - name: Report what will be skipped
   ansible.builtin.debug:
     msg: >-
-      No monitoring stack found on this host
-      ({{ observability_alloy_config_dir }}
-      {{ 'exists' if alloy_dir.stat.isdir | default(false) else 'is missing' }},
-      {{ observability_dashboard_dir }}
-      {{ 'exists' if dashboard_dir.stat.isdir | default(false) else 'is missing' }}).
+      No collector found on this host
+      ({{ observability_alloy_config_dir }} is missing).
       Skipping metrics collection. The server itself is unaffected.
-  when: not (alloy_dir.stat.isdir | default(false)) or not (dashboard_dir.stat.isdir | default(false))
+  when: not (alloy_dir.stat.isdir | default(false))
   tags: [observability]
 
 # One file, named after this project. Nothing touches the collector's central
@@ -44,17 +40,6 @@
   become: true
   when: alloy_dir.stat.isdir | default(false)
   notify: Reload the collector
-  tags: [observability]
-
-- name: Install the dashboard
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../observability/dashboards/{{ observability_dashboard_filename }}"
-    dest: "{{ observability_dashboard_dir }}/{{ observability_dashboard_filename }}"
-    owner: root
-    group: root
-    mode: '0644'
-  become: true
-  when: dashboard_dir.stat.isdir | default(false)
   tags: [observability]
 
 # The drop-in reads the journal, which is not readable by every service user.
