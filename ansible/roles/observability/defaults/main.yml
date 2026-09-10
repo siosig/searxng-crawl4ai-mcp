@@ -1,16 +1,12 @@
 ---
-# Everything here is skipped when the target has no monitoring stack. The
-# server does not depend on any of it, so neither does a successful deploy.
+# Everything here is skipped when the target has no collector. The server does
+# not depend on any of it, so neither does a successful deploy.
 
 # Where this host's collector takes per-service drop-ins. When this directory
 # does not exist, the whole role is skipped.
 observability_alloy_config_dir: /etc/alloy/config.d
 # Numeric prefix orders the drop-ins; the name identifies the owner.
 observability_alloy_filename: 23-searxng-crawl4ai-mcp.alloy
-
-# Where provisioned dashboards are read from. Skipped when absent.
-observability_dashboard_dir: /var/lib/grafana/dashboards/services
-observability_dashboard_filename: searxng-crawl4ai-mcp.json
 
 # The label that identifies this stack's metrics and logs among everything
 # else on the host.
