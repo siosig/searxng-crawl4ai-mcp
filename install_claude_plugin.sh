@@ -50,9 +50,27 @@ _env_get() {
   sed -n "s/^[[:space:]]*$1=//p" "${ENV_FILE}" | tail -n 1 | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
 }
 
-ENDPOINT="${SEARXNG_CRAWL4AI_ENDPOINT:-$(_env_get MCP_PUBLIC_ENDPOINT)}"
-TOKEN="${SEARXNG_CRAWL4AI_ACCESS_TOKEN:-$(_env_get MCP_PUBLIC_AUTH_TOKEN)}"
-[[ -z "${TOKEN}" ]] && TOKEN="$(_env_get MCP_AUTH_TOKEN)"
+# Track where each value came from: an environment variable that outlives the
+# shell it was set in wins over .env silently, and a 401 cannot tell them apart.
+if [[ -n "${SEARXNG_CRAWL4AI_ENDPOINT:-}" ]]; then
+  ENDPOINT="${SEARXNG_CRAWL4AI_ENDPOINT}"
+  ENDPOINT_SRC="env SEARXNG_CRAWL4AI_ENDPOINT"
+else
+  ENDPOINT="$(_env_get MCP_PUBLIC_ENDPOINT)"
+  ENDPOINT_SRC="${ENV_FILE} MCP_PUBLIC_ENDPOINT"
+fi
+
+if [[ -n "${SEARXNG_CRAWL4AI_ACCESS_TOKEN:-}" ]]; then
+  TOKEN="${SEARXNG_CRAWL4AI_ACCESS_TOKEN}"
+  TOKEN_SRC="env SEARXNG_CRAWL4AI_ACCESS_TOKEN"
+else
+  TOKEN="$(_env_get MCP_PUBLIC_AUTH_TOKEN)"
+  TOKEN_SRC="${ENV_FILE} MCP_PUBLIC_AUTH_TOKEN"
+  if [[ -z "${TOKEN}" ]]; then
+    TOKEN="$(_env_get MCP_AUTH_TOKEN)"
+    TOKEN_SRC="${ENV_FILE} MCP_AUTH_TOKEN"
+  fi
+fi
 SCOPE="${PLUGIN_SCOPE:-user}"
 
 MARKETPLACE_NAME="searxng-crawl4ai-mcp"
@@ -104,8 +122,8 @@ if [[ ! -f "${REPO_DIR}/.claude-plugin/marketplace.json" ]]; then
   echo "ERROR: marketplace.json not found at ${REPO_DIR}/.claude-plugin/" >&2
   exit 1
 fi
-echo "✓ endpoint: ${ENDPOINT}"
-echo "✓ token: set"
+echo "✓ endpoint: ${ENDPOINT} (from ${ENDPOINT_SRC})"
+echo "✓ token: set (from ${TOKEN_SRC})"
 echo "✓ marketplace source: ${MARKETPLACE_SOURCE}"
 
 # ── 3. Endpoint reachability ─────────────────────────────────────────────────
@@ -126,7 +144,12 @@ if [[ "${SKIP_CHECK:-0}" != "1" ]] && command -v curl &>/dev/null; then
   body="$(cat /tmp/.mcp_probe.$$ 2>/dev/null || true)"; rm -f /tmp/.mcp_probe.$$
   case "${code}" in
     200) echo "✓ endpoint: reachable, tools advertised: $(grep -o '"name":"web_[a-z_]*"' <<<"${body}" | wc -l)" ;;
-    401) echo "ERROR: the endpoint rejected the token (HTTP 401)." >&2; exit 1 ;;
+    401) echo "ERROR: the endpoint rejected the token (HTTP 401)." >&2
+         echo "       The token came from ${TOKEN_SRC}." >&2
+         if [[ "${TOKEN_SRC}" == env\ * ]]; then
+           echo "       That variable wins over ${ENV_FILE}; unset it to use the file." >&2
+         fi
+         exit 1 ;;
     000) echo "ERROR: could not reach ${ENDPOINT}." >&2
          echo "       Set SKIP_CHECK=1 to install anyway." >&2; exit 1 ;;
     *)   echo "ERROR: the endpoint answered HTTP ${code} (expected 200)." >&2

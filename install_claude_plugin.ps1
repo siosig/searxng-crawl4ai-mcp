@@ -101,9 +101,24 @@ if (-not $claude) {
 Write-Ok "claude: $($claude.Source)"
 
 # --- 2. Configuration --------------------------------------------------------
-if (-not $Endpoint) { $Endpoint = Get-EnvValue 'MCP_PUBLIC_ENDPOINT' }
-if (-not $Token)    { $Token    = Get-EnvValue 'MCP_PUBLIC_AUTH_TOKEN' }
-if (-not $Token)    { $Token    = Get-EnvValue 'MCP_AUTH_TOKEN' }
+# Track where each value came from, so a rejected token names the thing to fix.
+if ($Endpoint) {
+    $EndpointSrc = 'parameter -Endpoint'
+} else {
+    $Endpoint = Get-EnvValue 'MCP_PUBLIC_ENDPOINT'
+    $EndpointSrc = "$EnvFile MCP_PUBLIC_ENDPOINT"
+}
+
+if ($Token) {
+    $TokenSrc = 'parameter -Token'
+} else {
+    $Token = Get-EnvValue 'MCP_PUBLIC_AUTH_TOKEN'
+    $TokenSrc = "$EnvFile MCP_PUBLIC_AUTH_TOKEN"
+    if (-not $Token) {
+        $Token = Get-EnvValue 'MCP_AUTH_TOKEN'
+        $TokenSrc = "$EnvFile MCP_AUTH_TOKEN"
+    }
+}
 
 if (-not $Endpoint) {
     Write-Error "No endpoint. Set MCP_PUBLIC_ENDPOINT in $EnvFile, or pass -Endpoint.`n       Example: https://mcp.example.com/mcp-searxng-crawl4ai"
@@ -120,8 +135,8 @@ if (-not (Test-Path $manifest)) {
 }
 
 if (Test-Path $EnvFile) { Write-Ok "config from: $EnvFile" } else { Write-Ok "config from: parameters (no $EnvFile)" }
-Write-Ok "endpoint: $Endpoint"
-Write-Ok "token: set"
+Write-Ok "endpoint: $Endpoint (from $EndpointSrc)"
+Write-Ok "token: set (from $TokenSrc)"
 Write-Ok "marketplace source: $MarketplaceSource"
 
 # --- 3. Endpoint reachability ------------------------------------------------
@@ -157,7 +172,10 @@ if (-not $SkipCheck) {
             $count = ([regex]::Matches($res.Content, '"name":"web_[a-z_]*"')).Count
             Write-Ok "endpoint: reachable, tools advertised: $count"
         }
-        401 { Write-Error 'The endpoint rejected the token (HTTP 401).'; exit 1 }
+        401 {
+            Write-Error "The endpoint rejected the token (HTTP 401).`n       The token came from $TokenSrc."
+            exit 1
+        }
         default {
             Write-Error "The endpoint answered HTTP $($res.StatusCode) (expected 200).`n       $($res.Content.Substring(0, [Math]::Min(300, $res.Content.Length)))`n       Pass -SkipCheck to install anyway."
             exit 1
