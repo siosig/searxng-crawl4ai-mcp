@@ -45,6 +45,32 @@ test("web_batch_scrape reports each URL separately and keeps the order", async (
   assert.equal(structured.failedCount, 1, "a missing page must not fail the whole call");
 });
 
+test("web_scrape reports a missing page as the target's 404, not as a backend fault", async () => {
+  const { structured, isError } = await client.call("web_scrape", { url: `${FIXTURE}/missing.html` });
+  const reason = structured.failure as { kind?: string; upstreamStatus?: number | null; message?: string } | null;
+
+  assert.equal(isError, true, "a single-page read that failed must be announced as a failed call");
+  assert.equal(structured.status, "failed");
+  assert.equal(reason?.kind, "httpError");
+  assert.equal(
+    reason?.upstreamStatus,
+    404,
+    `the scraping backend's own failure leaked through instead: ${reason?.message}`,
+  );
+});
+
+test("web_scrape returns a page too short for Crawl4AI's structural heuristic", async () => {
+  const { structured } = await client.call("web_scrape", { url: `${FIXTURE}/version.txt` });
+  assert.equal(structured.status, "ok", JSON.stringify(structured.failure));
+  assert.match(String(structured.markdown), /1\.100\.0/);
+});
+
+test("web_batch_scrape of nothing but missing pages still reports per URL", async () => {
+  const { structured } = await client.call("web_batch_scrape", { urls: [`${FIXTURE}/missing.html`] });
+  assert.equal(structured.okCount, 0);
+  assert.equal(structured.failedCount, 1, "a batch in which every page fails must not fail as a whole");
+});
+
 test("web_map lists the links without returning the body", async () => {
   const { structured } = await client.call("web_map", {
     url: `${FIXTURE}/index.html`,

@@ -48,6 +48,18 @@ export interface RequestOptions {
    * added later by someone who says nothing here is simply not retried.
    */
   readonly idempotent?: boolean;
+  /**
+   * `ndjson` for a route that streams one JSON document per line. The body is
+   * then the array of those documents, in the order they arrived.
+   */
+  readonly responseFormat?: "json" | "ndjson";
+}
+
+function parseLines(text: string): unknown[] {
+  return text
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line): unknown => JSON.parse(line));
 }
 
 export interface UpstreamResponse<T> {
@@ -130,11 +142,21 @@ export async function request<T>(
         : new RetryAfterError(reason, retryAfterMs);
     }
 
+    // Read before measuring. A streamed response sends its headers at once and
+    // spends the whole upstream wait in the body, so timing to the headers
+    // would record every crawl as instant.
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
+      measure("failure");
+      throw new UpstreamError(toFailure(error));
+    }
     measure("success");
 
     let parsed: T;
     try {
-      parsed = (await response.json()) as T;
+      parsed = (options.responseFormat === "ndjson" ? parseLines(text) : JSON.parse(text)) as T;
     } catch {
       throw new UpstreamError(
         failure("upstreamUnavailable", "Upstream returned a body that is not JSON."),

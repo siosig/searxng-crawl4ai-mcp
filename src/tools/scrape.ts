@@ -32,6 +32,8 @@ export function registerScrapeTool(server: McpServer): void {
 
         const doc = await fetchSlots().run(() => getMarkdown(params.url));
         countDocuments([doc]);
+        // The one page asked for is the whole call, so its failure is the call's.
+        if (doc.status === "failed") return replyFailure(doc.failure!, params.format);
         return reply(documentMarkdown(doc), { ...doc }, params.format);
       }),
   );

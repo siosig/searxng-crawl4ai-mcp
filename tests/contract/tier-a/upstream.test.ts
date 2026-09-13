@@ -56,12 +56,57 @@ test("Crawl4AI is reachable over the network, not only on its own loopback", asy
 });
 
 test("Crawl4AI refuses unauthenticated API calls", async () => {
-  const res = await fetch(`${CRAWL4AI}/md`, {
+  const res = await fetch(`${CRAWL4AI}/crawl/stream`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url: "http://fixture-site/index.html" }),
+    body: JSON.stringify({ urls: ["http://fixture-site/index.html"] }),
   });
   assert.equal(res.status, 401);
+});
+
+const FIXTURE_PAGE = process.env.FIXTURE_PROBE ?? "http://fixture-site/index.html";
+
+async function streamLines(url: string): Promise<{ status: number; lines: Record<string, unknown>[] }> {
+  const res = await fetch(`${CRAWL4AI}/crawl/stream`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({ urls: [url], crawler_config: { stream: true } }),
+  });
+  const text = await res.text();
+  if (res.status !== 200) return { status: res.status, lines: [] };
+  const lines = text
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  return { status: res.status, lines };
+}
+
+test("the streaming route answers per URL even when the only page fails", async () => {
+  const { status, lines } = await streamLines(new URL("missing.html", FIXTURE_PAGE).toString());
+
+  // /md and /crawl answer a bare 500 here, which is why pages are read this way.
+  assert.equal(status, 200, "the stream now fails the whole request; web_scrape would report a 404 as a backend fault");
+  const result = lines.find((line) => typeof line.url === "string");
+  assert.ok(result, "no per-URL line in the stream");
+  assert.equal(result.status_code, 404, "the target's status code is no longer reported per URL");
+  assert.ok(
+    lines.some((line) => line.status === "completed"),
+    "the completion marker is gone",
+  );
+});
+
+test("a short page is still vetoed as a block, with its markdown kept", async () => {
+  const { lines } = await streamLines(new URL("version.txt", FIXTURE_PAGE).toString());
+  const result = lines.find((line) => typeof line.url === "string");
+  assert.ok(result, "no per-URL line in the stream");
+
+  // Upstream issue #2058. If this starts succeeding, the override in
+  // toDocument (src/upstream/crawl4ai.ts) has become dead code.
+  assert.equal(result.success, false, "short pages are no longer vetoed - reconsider the override in toDocument");
+  assert.match(String(result.error_message), /^Blocked by anti-bot protection: Structural:/);
+  assert.equal(result.status_code, 200);
+  const markdown = result.markdown as Record<string, unknown> | undefined;
+  assert.match(String(markdown?.raw_markdown), /1\.100\.0/, "the vetoed page's markdown is no longer returned");
 });
 
 test("Crawl4AI still returns markdown as an object with raw_markdown", async () => {
