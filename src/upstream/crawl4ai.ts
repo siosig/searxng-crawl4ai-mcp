@@ -1,6 +1,7 @@
 import { request } from "./http.js";
 import { env } from "../utils/env.js";
 import { failure, UpstreamError, type ToolFailure } from "../utils/errors.js";
+import type { UpstreamOperation } from "../metrics/record.js";
 import type { CrawlJob, FetchedDocument, JobState, PageLink } from "./types.js";
 
 /**
@@ -14,6 +15,11 @@ import type { CrawlJob, FetchedDocument, JobState, PageLink } from "./types.js";
  * `deep_crawl_strategy` from any HTTP caller, so multi-level crawling is
  * sequenced a level at a time by the composition layer. This module only ever
  * asks for a flat list of URLs.
+ *
+ * Pages are read through `/crawl/stream`, never `/md` or `/crawl`. Those two
+ * answer a bare 500 - detail withheld, only a correlation id - whenever the one
+ * page asked for fails, so a target's 404 arrived here as a backend fault. The
+ * stream answers 200 with a result per URL, status code and markdown included.
  */
 
 interface RawMarkdown {
@@ -26,7 +32,7 @@ interface RawLink {
   readonly text?: unknown;
 }
 
-interface RawCrawlResult {
+export interface RawCrawlResult {
   readonly url?: unknown;
   readonly redirected_url?: unknown;
   readonly success?: unknown;
@@ -53,6 +59,37 @@ interface RawJobStatus {
   readonly error?: unknown;
 }
 
+/** Which markdown variant to trust first. */
+export type MarkdownPreference = "raw" | "fit";
+
+export interface CrawlOptions {
+  /**
+   * Ask for boilerplate-filtered markdown, as a single-page read promises.
+   * Batch and crawl callers want every link and paragraph, so they leave it off.
+   */
+  readonly readable?: boolean;
+  readonly operation?: UpstreamOperation;
+}
+
+const ANTIBOT_PREFIX = "Blocked by anti-bot protection:";
+
+/**
+ * Crawl4AI's structural heuristic fails any page under 5KB with fewer than 50
+ * visible characters, whatever it answered - a 200 version file included. Only
+ * the pattern tiers identify an actual block page. Upstream issue #2058.
+ */
+const CONTENT_VETO = `${ANTIBOT_PREFIX} Structural:`;
+
+const STREAM_CONFIG = { stream: true } as const;
+
+const READABLE_CONFIG = {
+  stream: true,
+  markdown_generator: {
+    type: "DefaultMarkdownGenerator",
+    params: { content_filter: { type: "PruningContentFilter", params: {} } },
+  },
+} as const;
+
 function token(): string {
   return env().CRAWL4AI_API_TOKEN;
 }
@@ -65,23 +102,31 @@ function str(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
+function statusOf(raw: RawCrawlResult): number | null {
+  return typeof raw.status_code === "number" ? raw.status_code : null;
+}
+
 /**
  * `markdown` is an object, not a string.
  *
- * `fit_markdown` is the filtered variant and comes back empty on plenty of
- * ordinary pages, so `raw_markdown` is the one to trust; fit is only a
- * fallback for the rare case where raw is the empty one.
+ * Without a content filter `fit_markdown` comes back empty on plenty of
+ * ordinary pages, so `raw_markdown` is the one to trust there. A readable read
+ * asked for the filter, so it takes fit first and raw only when fit is empty.
  */
-function markdownOf(value: unknown): string | null {
+function markdownOf(value: unknown, prefer: MarkdownPreference): string | null {
   if (typeof value === "string") return value || null;
   if (value && typeof value === "object") {
     const m = value as RawMarkdown;
     const raw = str(m.raw_markdown);
-    if (raw) return raw;
     const fit = str(m.fit_markdown);
-    if (fit) return fit;
+    return (prefer === "fit" ? fit || raw : raw || fit) || null;
   }
   return null;
+}
+
+/** A code fence around nothing is not content. */
+function hasContent(markdown: string | null): boolean {
+  return markdown !== null && /[^\s`]/.test(markdown);
 }
 
 function linksOf(value: unknown): FetchedDocument["links"] {
@@ -101,7 +146,7 @@ function linksOf(value: unknown): FetchedDocument["links"] {
 
 /** Turn an upstream per-URL failure into a reason the caller can act on. */
 function resultFailure(raw: RawCrawlResult): ToolFailure {
-  const status = typeof raw.status_code === "number" ? raw.status_code : null;
+  const status = statusOf(raw);
   const message = str(raw.error_message, "The page could not be fetched.");
 
   if (status !== null && status >= 400) {
@@ -109,6 +154,13 @@ function resultFailure(raw: RawCrawlResult): ToolFailure {
       return failure("blocked", `The target refused automated access (${status}).`, status);
     }
     return failure("httpError", `The target answered ${status}.`, status);
+  }
+  if (message.startsWith(CONTENT_VETO)) {
+    return failure("httpError", "The page produced no readable content.", status);
+  }
+  if (message.startsWith(ANTIBOT_PREFIX)) {
+    const reason = message.slice(ANTIBOT_PREFIX.length).trim();
+    return failure("blocked", `The target served an anti-bot page (${reason}).`, status);
   }
   if (/timeout|timed out/i.test(message)) {
     return failure("timeout", message, status);
@@ -119,12 +171,24 @@ function resultFailure(raw: RawCrawlResult): ToolFailure {
   return failure("httpError", message, status);
 }
 
-function toDocument(raw: RawCrawlResult, requested: string): FetchedDocument {
-  const ok = raw.success === true;
-  const markdown = markdownOf(raw.markdown);
+export function toDocument(
+  raw: RawCrawlResult,
+  requested: string,
+  prefer: MarkdownPreference = "raw",
+): FetchedDocument {
+  const markdown = markdownOf(raw.markdown, prefer);
   const metadata = (raw.metadata ?? {}) as { title?: unknown };
+  const status = statusOf(raw);
 
-  if (!ok || markdown === null) {
+  const vetoOverruled =
+    raw.success !== true &&
+    status !== null &&
+    status >= 200 &&
+    status < 300 &&
+    str(raw.error_message).startsWith(CONTENT_VETO) &&
+    hasContent(markdown);
+
+  if ((raw.success !== true && !vetoOverruled) || markdown === null) {
     return {
       url: str(raw.url, requested),
       finalUrl: str(raw.redirected_url) || null,
@@ -148,39 +212,48 @@ function toDocument(raw: RawCrawlResult, requested: string): FetchedDocument {
 }
 
 /**
- * Fetch one or more URLs in a single call.
+ * One document per requested URL, in the order asked, from the stream's lines.
  *
- * Order is preserved by matching on the requested URL rather than trusting the
- * response order, and a URL the server said nothing about becomes an explicit
- * failure instead of silently vanishing from the results.
+ * The stream emits results as pages finish, so order is restored by URL. A
+ * result reported under a different spelling of its URL is paired with the
+ * remaining unmatched request instead, and a URL the server said nothing about
+ * becomes an explicit failure instead of silently vanishing from the results.
  */
-export async function crawl(urls: readonly string[]): Promise<FetchedDocument[]> {
-  if (urls.length === 0) return [];
-
-  const { body } = await request<RawCrawlResponse>(base("/crawl"), {
-    method: "POST",
-    token: token(),
-    body: { urls: [...urls] },
-    // A POST that creates nothing: the server fetches the pages and answers
-    // with what it read, keeping no record of having been asked. Sending it
-    // again after a transient failure costs another fetch and nothing else.
-    idempotent: true,
-    upstream: "crawl4ai",
-    operation: "crawl",
+export function documentsFor(
+  urls: readonly string[],
+  lines: readonly unknown[],
+  prefer: MarkdownPreference,
+): FetchedDocument[] {
+  const results: RawCrawlResult[] = lines.flatMap((line) => {
+    if (!line || typeof line !== "object") return [];
+    const entry = line as RawCrawlResult & { error?: unknown };
+    if (typeof entry.url !== "string") return [];
+    // A result the server could not serialise arrives as `{error, url}`.
+    if (entry.success === undefined && entry.error !== undefined) {
+      return [{ url: entry.url, success: false, error_message: str(entry.error) }];
+    }
+    return [entry];
   });
 
-  const rawResults = Array.isArray(body.results)
-    ? (body.results as RawCrawlResult[])
-    : [];
-
+  const unclaimed = new Set(results);
   const byUrl = new Map<string, RawCrawlResult>();
-  for (const r of rawResults) {
+  for (const r of results) {
     const key = str(r.url);
-    if (key && !byUrl.has(key)) byUrl.set(key, r);
+    if (!byUrl.has(key)) byUrl.set(key, r);
   }
 
+  const matched = urls.map((requested) => {
+    const raw = byUrl.get(requested);
+    if (raw !== undefined && unclaimed.has(raw)) {
+      unclaimed.delete(raw);
+      return raw;
+    }
+    return undefined;
+  });
+  const leftovers = [...unclaimed];
+
   return urls.map((requested, index) => {
-    const raw = byUrl.get(requested) ?? rawResults[index];
+    const raw = matched[index] ?? leftovers.shift();
     if (raw === undefined) {
       return {
         url: requested,
@@ -195,48 +268,39 @@ export async function crawl(urls: readonly string[]): Promise<FetchedDocument[]>
         ),
       };
     }
-    return toDocument(raw, requested);
+    return toDocument(raw, requested, prefer);
   });
 }
 
-/** Fetch a single URL as markdown via the dedicated endpoint. */
+/** Fetch one or more URLs in a single call. */
+export async function crawl(
+  urls: readonly string[],
+  options: CrawlOptions = {},
+): Promise<FetchedDocument[]> {
+  if (urls.length === 0) return [];
+  const readable = options.readable === true;
+
+  const { body } = await request<unknown[]>(base("/crawl/stream"), {
+    method: "POST",
+    token: token(),
+    body: { urls: [...urls], crawler_config: readable ? READABLE_CONFIG : STREAM_CONFIG },
+    responseFormat: "ndjson",
+    // A POST that creates nothing: the server fetches the pages and answers
+    // with what it read, keeping no record of having been asked. Sending it
+    // again after a transient failure costs another fetch and nothing else.
+    idempotent: true,
+    upstream: "crawl4ai",
+    operation: options.operation ?? "crawl",
+  });
+
+  return documentsFor(urls, body, readable ? "fit" : "raw");
+}
+
+/** Fetch a single URL as readable markdown. */
 export async function getMarkdown(url: string): Promise<FetchedDocument> {
-  const { body } = await request<{ markdown?: unknown; success?: unknown }>(
-    base("/md"),
-    {
-      method: "POST",
-      token: token(),
-      body: { url },
-      // POST only because the URL travels in the body. Nothing is created; the
-      // same request run twice re-reads the page and returns the same shape.
-      idempotent: true,
-      upstream: "crawl4ai",
-      operation: "markdown",
-    },
-  );
-
-  const markdown = markdownOf(body.markdown);
-  if (body.success === false || markdown === null) {
-    return {
-      url,
-      finalUrl: null,
-      status: "failed",
-      markdown: null,
-      title: null,
-      links: null,
-      failure: failure("httpError", "The page produced no readable content."),
-    };
-  }
-
-  return {
-    url,
-    finalUrl: null,
-    status: "ok",
-    markdown,
-    title: null,
-    links: null,
-    failure: null,
-  };
+  const [doc] = await crawl([url], { readable: true, operation: "markdown" });
+  // A single-page read has never returned links; keep its output that size.
+  return { ...doc!, links: null };
 }
 
 /** Submit an asynchronous crawl. Answers 202 with a task id. */
