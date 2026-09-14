@@ -1,0 +1,30 @@
+# Loopback access for another service on this host, as a separate overlay.
+#
+# The base topology (compose.yaml) deliberately keeps searxng and crawl4ai off
+# the host: nothing outside the compose network is supposed to reach them, and
+# only mcp is published on loopback. Enabling this overlay opts out of that
+# isolation for one specific reason - some other service on the same machine
+# needs to call searxng or crawl4ai directly, not through the MCP tools.
+#
+# The two upstreams are not equally exposed once this is on:
+#
+#   * crawl4ai still requires `Authorization: Bearer ${CRAWL4AI_API_TOKEN}` on
+#     every route (see compose.yaml), so loopback reachability does not by
+#     itself grant access.
+#   * searxng has no authentication at all. Publishing it here means every
+#     local user and process on this host can query it, unauthenticated -
+#     never the LAN or the internet, because the mapping binds 127.0.0.1 only,
+#     but local is still a real boundary to cross. Only turn this on when a
+#     host-local consumer genuinely needs it.
+#
+#   docker compose --env-file versions.env --env-file .env \
+#     -f docker/compose.yaml -f docker/compose.local-services.yaml up -d
+
+services:
+  searxng:
+    ports:
+      - "127.0.0.1:${LOCAL_SEARXNG_PORT:-8081}:8080"
+
+  crawl4ai:
+    ports:
+      - "127.0.0.1:${LOCAL_CRAWL4AI_PORT:-11235}:11235"

@@ -29,3 +29,11 @@ mcp_local_env_file: "{{ playbook_dir }}/../.env"
 # is created and no extra port is published - which is what a host with no
 # monitoring stack should get.
 mcp_metrics_port: ""
+
+# Local-service access to the upstream containers. Empty means the overlay is
+# not used at all - searxng and crawl4ai stay off the host entirely, which is
+# the right default. Set both when another service on this host needs to talk
+# to them directly (see docker/compose.local-services.yaml for what this opts
+# out of).
+mcp_local_searxng_port: ""
+mcp_local_crawl4ai_port: ""
