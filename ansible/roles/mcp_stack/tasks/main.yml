@@ -5,7 +5,11 @@
   ansible.builtin.set_fact:
     mcp_compose_files: >-
       -f compose.yaml{{ ' -f compose.metrics.yaml'
-        if mcp_metrics_port | default('') | string | length > 0 else '' }}
+        if mcp_metrics_port | default('') | string | length > 0 else '' }}{{
+        ' -f compose.local-services.yaml'
+        if (mcp_local_searxng_port | default('') | string | length > 0
+            or mcp_local_crawl4ai_port | default('') | string | length > 0)
+        else '' }}
   tags: [mcp_stack, configure, deploy]
 
 - name: Ensure the deployment directory exists
@@ -43,6 +47,17 @@
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../docker/compose.metrics.yaml"
     dest: "{{ mcp_deploy_dir }}/compose.metrics.yaml"
+    owner: root
+    group: root
+    mode: '0640'
+  become: true
+  notify: Restart the MCP stack
+  tags: [mcp_stack, configure]
+
+- name: Copy the local-services compose overlay
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../docker/compose.local-services.yaml"
+    dest: "{{ mcp_deploy_dir }}/compose.local-services.yaml"
     owner: root
     group: root
     mode: '0640'
