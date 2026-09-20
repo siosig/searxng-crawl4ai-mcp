@@ -36,7 +36,7 @@ reverse proxy  ->  mcp        this repository; the only code here
 ```
 
 Three containers, no database. The server holds no state: crawl job state lives
-in Crawl4AI, and nothing is cached between calls.
+in Crawl4AI.
 
 ## Tools
 
