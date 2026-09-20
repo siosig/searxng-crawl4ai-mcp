@@ -167,6 +167,60 @@ pwsh -ExecutionPolicy Bypass -File .\install_claude_plugin.ps1
 came in as a download, where `RemoteSigned` refuses to run it. Restart Claude
 Code afterwards.
 
+## Using with LLMs
+
+All eight tools are exposed to any LLM client that understands MCP. The HTTP transport requires a bearer token; stdio is for local development and single-user setups.
+
+### LLM configuration for structured extraction
+
+`web_extract` uses Google's Gemini API to pull structured fields from pages. To enable it:
+
+1. Get a free Gemini API key at [Google AI Studio](https://aistudio.google.com/apikey)
+2. Add to `.env`:
+   ```
+   GEMINI_API_KEY=<your-key>
+   ```
+3. Optionally override the model (default: `gemini-flash-lite-latest`):
+   ```
+   GEMINI_MODEL=gemini/gemini-2.0-flash
+   ```
+
+Without a key, `web_extract` degrades gracefully and returns the page as markdown. The other seven tools are unaffected and do not need LLM credentials.
+
+### Tool selection guide
+
+**Question answering**: Use `web_search_and_scrape` to search and read top results in one call. This is faster and more accurate than searching alone, since you get the full source pages with the results.
+
+**Exploring a site**: Start with `web_map` to list links, then `web_scrape` or `web_crawl` to read. This avoids fetching pages you don't need.
+
+**Single page**: `web_scrape` reads one page as markdown, rendering JavaScript. Use it for dynamic content that plain HTTP fetch cannot read.
+
+**Multiple pages at once**: `web_batch_scrape` fetches a list of URLs in parallel. Unlike calling `web_scrape` repeatedly, a failure on one URL does not stop the others, and you get the reason for each failure.
+
+**Crawling a site**: `web_crawl` follows links from a starting URL up to a depth and page limit. It stays on the same host by default. When a crawl hits a limit, it reports which one, so you know whether to raise the limit or stop.
+
+**Extracting structured data**: `web_extract` pulls specific fields out of a page (e.g. "product name, price, availability") in plain language. When LLM credentials are not configured, it returns the page as markdown and leaves the reading to you.
+
+**Long-running crawls**: `web_crawl` returns immediately with a `jobId`. Use `web_job_status` to poll for results. The same id always reports the same state, so polling is safe.
+
+### Error handling
+
+Every tool returns structured results with a `status` field: `"ok"`, `"failed"`, or `"partial"` (some URLs succeeded, others did not). When status is `"failed"`, a `failure` field describes why:
+
+- `"access_denied"` — the target is on a private, loopback, link-local or cloud metadata range
+- `"host_unreachable"` — DNS failed, the connection timed out, or the server is not listening
+- `"http_error"` — the server responded with a 4xx or 5xx status
+- `"parsing_failed"` — the content exists but could not be parsed as HTML or markdown
+- `"response_size_exceeded"` — the response was larger than 25,000 characters (truncated in output)
+
+Distinguish between these when deciding what to do next. "Access denied" means the target is blocked by policy; "host unreachable" means trying again later might work; "http_error" on a 404 means the page does not exist.
+
+### Rate limiting and budgets
+
+- Each tool call has a timeout (typically 30 seconds). Requests to SearXNG or Crawl4AI that fail quickly are retried with backoff, but those that exhaust their timeout are not, because repeating them would double the wait.
+- Large crawls may return fewer pages than requested if they hit the page limit, depth limit, or time budget. The response reports which limit was reached.
+- Responses are capped at 25,000 characters. When truncated, the output says so and you can `web_job_status` to retrieve the full results (for crawls) or re-fetch with different parameters.
+
 ## Development
 
 ```sh
