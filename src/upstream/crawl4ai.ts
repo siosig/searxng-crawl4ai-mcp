@@ -7,19 +7,29 @@ import type { CrawlJob, FetchedDocument, JobState, PageLink } from "./types.js";
 /**
  * Crawl4AI's HTTP API.
  *
- * Everything below was verified against a running Crawl4AI 0.9.2 container
+ * Everything below was verified against a running Crawl4AI 0.9.3 container
  * (its own /openapi.json plus observed responses) rather than taken from the
  * documentation, which disagreed on several points.
  *
- * Note what is absent: no deep-crawl request. The server refuses
- * `deep_crawl_strategy` from any HTTP caller, so multi-level crawling is
- * sequenced a level at a time by the composition layer. This module only ever
- * asks for a flat list of URLs.
+ * Each workaround in this module is pinned by a test in
+ * tests/contract/tier-a/upstream.test.ts that fails the day its cause goes
+ * away. When one fails after an upstream bump, the test name says which
+ * guarantee was withdrawn; the workaround it guards can then be re-examined.
  *
- * Pages are read through `/crawl/stream`, never `/md` or `/crawl`. Those two
- * answer a bare 500 - detail withheld, only a correlation id - whenever the one
- * page asked for fails, so a target's 404 arrived here as a backend fault. The
- * stream answers 200 with a result per URL, status code and markdown included.
+ * Note what is absent: no deep-crawl request. The server loads every HTTP body
+ * as untrusted and lists `deep_crawl_strategy` among the fields an untrusted
+ * body may never set, so it refuses it from any HTTP caller and no token or
+ * setting changes that. Multi-level crawling is therefore sequenced a level at
+ * a time by the composition layer, and that is permanent, not a stopgap. This
+ * module only ever asks for a flat list of URLs.
+ *
+ * Pages are read through `/crawl/stream`, never `/md`. `/md` answers one URL
+ * with one status: a target's 404 comes back as a 502 carrying the anti-bot
+ * veto text, so the 404 is lost, and a short page that the streamed read
+ * recovers (see CONTENT_VETO) fails outright. The stream answers 200 with a
+ * result per URL, status code and markdown included. (`/crawl` answered 200
+ * for a 404 page when last tried; it was not investigated further, because the
+ * stream already returns everything needed.)
  */
 
 interface RawMarkdown {
@@ -77,6 +87,11 @@ const ANTIBOT_PREFIX = "Blocked by anti-bot protection:";
  * Crawl4AI's structural heuristic fails any page under 5KB with fewer than 50
  * visible characters, whatever it answered - a 200 version file included. Only
  * the pattern tiers identify an actual block page. Upstream issue #2058.
+ *
+ * Reproduced, not inferred: the contract test "a short page is still vetoed as
+ * a block" fetches a 200 text file and watches it fail. The heuristic's
+ * thresholds are constants in the library; no request field or setting reaches
+ * them, so overruling the verdict here is the only option.
  */
 const CONTENT_VETO = `${ANTIBOT_PREFIX} Structural:`;
 
@@ -112,6 +127,8 @@ function statusOf(raw: RawCrawlResult): number | null {
  * Without a content filter `fit_markdown` comes back empty on plenty of
  * ordinary pages, so `raw_markdown` is the one to trust there. A readable read
  * asked for the filter, so it takes fit first and raw only when fit is empty.
+ * Upstream does not make that fallback itself (pinned by "without a content
+ * filter fit_markdown is empty while raw_markdown is not").
  */
 function markdownOf(value: unknown, prefer: MarkdownPreference): string | null {
   if (typeof value === "string") return value || null;
@@ -347,7 +364,9 @@ function jobState(status: string): JobState {
  *
  * The status body carries a `_links` object, which is deliberately ignored: it
  * was observed pointing at `.../\/llm/<crawl id>` - a doubled slash and the
- * wrong route - so the polling URL is built here instead.
+ * wrong route - so the polling URL is built here instead. (The submit response
+ * carries no `_links` at all, only the task id.) Pinned by "the job status body
+ * still links to the wrong route".
  */
 export async function getJobStatus(jobId: string): Promise<CrawlJob> {
   const { body } = await request<RawJobStatus>(
@@ -395,10 +414,14 @@ export async function getJobStatus(jobId: string): Promise<CrawlJob> {
 /**
  * Structured extraction.
  *
- * The documented `POST /llm/{path}` does not exist in 0.9.2; the real route is
- * `GET /llm/{url}?q=...`. With no model credentials configured the endpoint is
- * unavailable, which callers turn into a degraded response rather than an
- * error.
+ * The documented `POST /llm/{path}` does not exist in 0.9.3; the real route is
+ * `GET /llm/{url}?q=...`, which the server's own /openapi.json lists. (A
+ * `POST /llm/job` route also exists now. It is asynchronous, so a caller
+ * waiting on the answer gains nothing from it, and it is not used.) With no
+ * model credentials configured the endpoint is unavailable, which callers turn
+ * into a degraded response rather than an error. Pinned by "the extraction
+ * route is GET /llm/{url}" and, where a credential exists, "GET /llm/{url}
+ * answers with an extraction".
  */
 export async function extract(url: string, instruction: string): Promise<unknown> {
   const target = base(`/llm/${encodeURIComponent(url)}`);

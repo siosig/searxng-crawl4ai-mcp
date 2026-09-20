@@ -20,6 +20,14 @@ export const CHARACTER_LIMIT = 25_000;
  * memory and CPU budget. The default suits a developer machine; low-power
  * hosts should lower it through MAX_CONCURRENT_FETCHES rather than editing
  * this constant.
+ *
+ * This is not a duplicate of anything Crawl4AI already does. Its own limits
+ * (config.yml in 0.9.3: `pool.max_pages` 40 pages at once, a dispatcher that
+ * backs off only at `memory_threshold_percent` 95, and a rate limiter that
+ * spaces requests to the same site) protect the container and the target, and
+ * they only bite near exhaustion. This one bounds what a single low-power host
+ * is asked to carry, and at 4 - or the 2 the deployment sets - it is always the
+ * tighter of the two, so the upstream limits are never what holds a fetch back.
  */
 export const DEFAULT_MAX_CONCURRENT_FETCHES = 4;
 

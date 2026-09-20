@@ -244,6 +244,13 @@ export async function search(options: SearchOptions): Promise<SearchResult> {
   let pagesFetched = 0;
   let shortfall: ShortfallReason | null = null;
 
+  // Paging and de-duplication live here because SearXNG offers neither: no
+  // request parameter caps or sizes a result list (`limit`, `count`,
+  // `results_per_page` and `num` are all ignored), and consecutive pages are
+  // not de-duplicated against each other - two adjacent pages of one query
+  // shared 6 of their URLs when measured. Pinned by "SearXNG has no way to ask
+  // for fewer results". The overlap itself is not asserted: it depends on what
+  // the public engines return, so a gating test cannot rely on it.
   for (let pageno = 1; pageno <= SEARCH_MAX_PAGES; pageno++) {
     let page: SearchPage;
     try {

@@ -126,6 +126,25 @@ lives there or in the deployment inventory, never in a tracked file.
 To roll back, restore the previous `versions.env` and redeploy. Image tags are
 pinned, so the previous state is reproducible.
 
+### When the contract tests fail after a bump
+
+Several behaviours here exist only to work around something the upstream does
+not do: the level-by-level crawl (Crawl4AI refuses a deep-crawl strategy from
+any HTTP caller by design), the paging and de-duplication of search results,
+the message-matching error classification, the override of Crawl4AI's
+short-page block verdict, and a few more. Each one is pinned by a test in
+`tests/contract/tier-a/upstream.test.ts` that fails the day its cause goes
+away, and the test name says which guarantee was withdrawn.
+
+So a red test after a version bump is information, not only breakage: it may
+mean a workaround can now be removed. Read the failing test's name and the
+comment on the code it guards before changing anything, and do not redo the
+inventory by hand.
+
+One check needs a model credential and is skipped, by name, wherever
+`GEMINI_API_KEY` is not set - which includes CI. Run the contract tests once on
+a machine that has the key before deploying a bump.
+
 ## Outbound request policy
 
 Fetch targets are resolved to IP addresses before the request is made, and
