@@ -37,4 +37,4 @@ jobs:
         env:
           RENOVATE_REPOSITORIES: ${{ github.repository }}
           RENOVATE_PLATFORM: github
-          LOG_LEVEL: debug
+          LOG_LEVEL: info
