@@ -15,7 +15,7 @@
       "description": "Upstream container images, declared only in versions.env",
       "managerFilePatterns": ["/^versions\\.env$/"],
       "matchStrings": [
-        "(?<depName>[a-z0-9._/-]+):(?<currentValue>[A-Za-z0-9._-]+)\\s*$"
+        "(?m)^[A-Z0-9_]+_IMAGE=(?<depName>[a-z0-9._/-]+):(?<currentValue>[A-Za-z0-9._-]+)\\s*$"
       ],
       "datasourceTemplate": "docker"
     }
