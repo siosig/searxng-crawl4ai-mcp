@@ -5,10 +5,20 @@ name: Renovate
 #
 # Renovate runs here rather than as a hosted app so the whole update mechanism
 # lives in this repository and needs no external installation.
+#
+# Two settings below have to agree with renovate.json:
+#  - The cron must land inside its `schedule` ("before 6am on monday", Asia/Tokyo),
+#    otherwise Renovate starts, sees it is out of schedule and opens nothing.
+#    Sunday 19:00 UTC is Monday 04:00 JST, leaving room for GitHub's start delay.
+#  - Branches pushed with the default GITHUB_TOKEN do not trigger other workflows,
+#    so the contract tests would never run on an update PR. Store a fine-grained
+#    personal access token as the RENOVATE_TOKEN secret (repository: this one;
+#    permissions: Contents, Pull requests, Issues, Workflows = read and write).
+#    Until it exists the job falls back to GITHUB_TOKEN and PRs get no test run.
 
 on:
   schedule:
-    - cron: "0 3 * * 1"
+    - cron: "0 19 * * 0"
   workflow_dispatch:
 
 permissions:
@@ -23,7 +33,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: renovatebot/github-action@9fea9f0fbf80401026d11d03911d62b1f70fef1f # v46.3.3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RENOVATE_TOKEN || secrets.GITHUB_TOKEN }}
         env:
           RENOVATE_REPOSITORIES: ${{ github.repository }}
           RENOVATE_PLATFORM: github
