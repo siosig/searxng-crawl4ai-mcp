@@ -6,7 +6,7 @@
   "labels": ["upstream-update"],
   "prConcurrentLimit": 3,
 
-  "//": "No automerge, anywhere. The contract tests say whether a release works; a human still decides whether to deploy it.",
+  "description": ["No automerge, anywhere. The contract tests say whether a release works; a human still decides whether to deploy it."],
   "automerge": false,
 
   "customManagers": [
