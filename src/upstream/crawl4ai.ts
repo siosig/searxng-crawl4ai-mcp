@@ -1,7 +1,9 @@
 import { request } from "./http.js";
+import { describeLoginPage, isLoginRedirect } from "./login-detect.js";
+import { assertNotLoggingIn } from "./login-session.js";
 import { env } from "../utils/env.js";
 import { failure, UpstreamError, type ToolFailure } from "../utils/errors.js";
-import type { UpstreamOperation } from "../metrics/record.js";
+import { recordLoginRequired, type UpstreamOperation } from "../metrics/record.js";
 import type { CrawlJob, FetchedDocument, JobState, PageLink } from "./types.js";
 
 /**
@@ -196,6 +198,28 @@ export function toDocument(
   const markdown = markdownOf(raw.markdown, prefer);
   const metadata = (raw.metadata ?? {}) as { title?: unknown };
   const status = statusOf(raw);
+  const finalUrl = str(raw.redirected_url) || null;
+
+  // Checked before success or failure: a sign-in page is short enough to be
+  // vetoed as a block, and the redirect leaves status_code at 3xx, so the
+  // upstream verdict says nothing useful here. Where the request ended up does.
+  // An error status is the exception: that is the target's own answer.
+  if (isLoginRedirect(requested, finalUrl) && !(status !== null && status >= 400)) {
+    recordLoginRequired();
+    return {
+      url: str(raw.url, requested),
+      finalUrl,
+      status: "failed",
+      markdown: null,
+      title: null,
+      links: null,
+      failure: failure(
+        "loginRequired",
+        `The site sent this request to a sign-in page (${describeLoginPage(finalUrl!)}); the saved login is missing or has expired. Log in again with "login-session start" on the server.`,
+        status,
+      ),
+    };
+  }
 
   const vetoOverruled =
     raw.success !== true &&
@@ -208,7 +232,7 @@ export function toDocument(
   if ((raw.success !== true && !vetoOverruled) || markdown === null) {
     return {
       url: str(raw.url, requested),
-      finalUrl: str(raw.redirected_url) || null,
+      finalUrl,
       status: "failed",
       markdown: null,
       title: null,
@@ -219,7 +243,7 @@ export function toDocument(
 
   return {
     url: str(raw.url, requested),
-    finalUrl: str(raw.redirected_url) || null,
+    finalUrl,
     status: "ok",
     markdown,
     title: str(metadata.title) || null,
@@ -295,6 +319,7 @@ export async function crawl(
   options: CrawlOptions = {},
 ): Promise<FetchedDocument[]> {
   if (urls.length === 0) return [];
+  assertNotLoggingIn();
   const readable = options.readable === true;
 
   const { body } = await request<unknown[]>(base("/crawl/stream"), {
@@ -322,6 +347,7 @@ export async function getMarkdown(url: string): Promise<FetchedDocument> {
 
 /** Submit an asynchronous crawl. Answers 202 with a task id. */
 export async function submitCrawlJob(urls: readonly string[]): Promise<string> {
+  assertNotLoggingIn();
   const { body } = await request<RawJobSubmit>(base("/crawl/job"), {
     method: "POST",
     token: token(),
@@ -369,6 +395,7 @@ function jobState(status: string): JobState {
  * still links to the wrong route".
  */
 export async function getJobStatus(jobId: string): Promise<CrawlJob> {
+  assertNotLoggingIn();
   const { body } = await request<RawJobStatus>(
     base(`/crawl/job/${encodeURIComponent(jobId)}`),
     { method: "GET", token: token(), upstream: "crawl4ai", operation: "job_status" },
@@ -424,6 +451,7 @@ export async function getJobStatus(jobId: string): Promise<CrawlJob> {
  * answers with an extraction".
  */
 export async function extract(url: string, instruction: string): Promise<unknown> {
+  assertNotLoggingIn();
   const target = base(`/llm/${encodeURIComponent(url)}`);
   const withQuery = new URL(target);
   withQuery.searchParams.set("q", instruction);

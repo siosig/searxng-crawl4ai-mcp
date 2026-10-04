@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { documentsFor, toDocument } from "../../src/upstream/crawl4ai.js";
+import fs from "node:fs";
+import os from "node:os";
+import { join } from "node:path";
+import { crawl, documentsFor, toDocument } from "../../src/upstream/crawl4ai.js";
+import { LOGIN_MARKER_FILE, SESSION_ROOT_FILE } from "../../src/upstream/login-session.js";
+import { setEnvForTest, type Env } from "../../src/utils/env.js";
+import { UpstreamError } from "../../src/utils/errors.js";
 
 /**
  * How a Crawl4AI result becomes a document.
@@ -62,6 +68,86 @@ test("the structural verdict still fails a page with nothing in it", () => {
   );
   assert.equal(doc.status, "failed");
   assert.equal(doc.failure?.message, "The page produced no readable content.");
+});
+
+const PRIVATE = "https://example.test/private/doc";
+const SIGN_IN = "https://example.test/login?return_to=%2Fprivate%2Fdoc&session=abc123";
+
+test("a page that ended on a sign-in page is a lost login, not content", () => {
+  const doc = toDocument(
+    {
+      url: PRIVATE,
+      redirected_url: SIGN_IN,
+      success: true,
+      status_code: 200,
+      markdown: { raw_markdown: "# Sign in\n\nEmail\n\nPassword\n" },
+      metadata: { title: "Sign in" },
+    },
+    PRIVATE,
+  );
+  assert.equal(doc.status, "failed");
+  assert.equal(doc.failure?.kind, "loginRequired");
+  assert.equal(doc.markdown, null);
+  assert.equal(doc.finalUrl, SIGN_IN);
+  const message = String(doc.failure?.message);
+  assert.match(message, /https:\/\/example\.test\/login/);
+  // The query of a sign-in address can carry tokens; it never reaches the message.
+  assert.ok(!message.includes("return_to"), message);
+  assert.ok(!message.includes("abc123"), message);
+  assert.ok(!message.includes("?"), message);
+});
+
+test("a page that stayed where it was asked for is content as before", () => {
+  const doc = toDocument(
+    {
+      url: PRIVATE,
+      redirected_url: PRIVATE,
+      success: true,
+      status_code: 200,
+      markdown: { raw_markdown: "# Private doc\n\nBody text.\n" },
+      metadata: { title: "Private doc" },
+    },
+    PRIVATE,
+  );
+  assert.equal(doc.status, "ok", JSON.stringify(doc.failure));
+  assert.equal(doc.failure, null);
+  assert.equal(doc.title, "Private doc");
+});
+
+test("a sign-in page vetoed as too short is still a lost login", () => {
+  // What Crawl4AI really returns for a redirect to a small sign-in form: the
+  // redirect leaves status_code at 302 and the page trips the content veto.
+  const doc = toDocument(
+    {
+      url: PRIVATE,
+      redirected_url: SIGN_IN,
+      success: false,
+      status_code: 302,
+      error_message: VETO,
+      markdown: { raw_markdown: "# Sign in\n" },
+    },
+    PRIVATE,
+  );
+  assert.equal(doc.status, "failed");
+  assert.equal(doc.failure?.kind, "loginRequired");
+  assert.equal(doc.failure?.upstreamStatus, 302);
+});
+
+test("a failed fetch keeps its own failure kind even when it ended on a sign-in page", () => {
+  const doc = toDocument(
+    {
+      url: PRIVATE,
+      redirected_url: SIGN_IN,
+      success: false,
+      status_code: 404,
+      error_message: "Not Found",
+      markdown: { raw_markdown: "" },
+    },
+    PRIVATE,
+  );
+  assert.equal(doc.status, "failed");
+  assert.notEqual(doc.failure?.kind, "loginRequired");
+  assert.equal(doc.failure?.kind, "httpError");
 });
 
 test("a recognised block page is reported as blocked, not as content", () => {
@@ -129,4 +215,37 @@ test("a result reported under a different spelling of its URL is still attribute
   const [doc] = documentsFor([A], [ok(`${A}/`, "A")], "raw");
   assert.equal(doc?.status, "ok");
   assert.equal(doc?.markdown, "A");
+});
+
+test("a crawl during a manual login is refused before anything leaves the process", async () => {
+  const dir = fs.mkdtempSync(os.tmpdir() + "/c4ai-login-");
+  fs.writeFileSync(join(dir, SESSION_ROOT_FILE), "");
+  fs.writeFileSync(join(dir, LOGIN_MARKER_FILE), "login");
+  // A complete upstream configuration, so that without the gate the call would
+  // genuinely reach fetch - the assertion below would otherwise prove nothing.
+  setEnvForTest({
+    CRAWL4AI_URL: "http://crawl4ai.invalid:11235",
+    CRAWL4AI_API_TOKEN: "0123456789abcdef0123456789abcdef",
+    RETRY_MAX_ATTEMPTS: 1,
+    LOGIN_STATE_DIR: dir,
+  } as unknown as Env);
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    throw new Error("the network must not be reached during a login");
+  }) as typeof fetch;
+
+  try {
+    await assert.rejects(crawl(["http://example.invalid/"]), (error: unknown) => {
+      assert.ok(error instanceof UpstreamError);
+      assert.equal(error.failure.kind, "loginInProgress");
+      return true;
+    });
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = original;
+    setEnvForTest(null);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

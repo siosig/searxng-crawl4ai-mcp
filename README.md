@@ -164,6 +164,142 @@ deployment.
 idempotent and pulls prebuilt images; it never builds on the target, which
 matters when that target is a low-power machine.
 
+## Logged-in fetching (optional)
+
+Some pages show their real content only to a signed-in member. Instead of
+storing site credentials in configuration, crawl4ai can run its browser on one
+saved profile: you sign in to a site once, by hand, in a Google Chrome window
+that the host opens on that profile, and every later fetch carries that login.
+Any number of sites can be added this way without a configuration change. A
+fetch that a site redirects to its login page fails with `loginRequired`, so an
+expired login is visible instead of silently returning the public page.
+
+### Enabling it
+
+Set these in the host's `host_vars` (see
+[ansible/inventory/host_vars.example.md](ansible/inventory/host_vars.example.md));
+leaving `mcp_login_session_root` empty keeps the feature off.
+
+- `mcp_login_session_mountpoint` - the disk that holds the store.
+- `mcp_login_session_root` - the store itself, under the mount point. It holds
+  `profile/` (the browser profile) and `state/`.
+- `mcp_login_user` - the host user that runs the login browser; the user whose
+  desktop shows it. Required when
+  `mcp_login_session_root` is set.
+- `mcp_login_display` (`:1`) and `mcp_login_browser` (`/usr/bin/google-chrome`)
+  - the X display to open the browser on, and the browser. The defaults fit
+  a host with a single desktop on `:1`.
+
+The host must already have Google Chrome and a way to show a browser on that
+display - a VNC desktop, a monitor, whichever it has. `login-session` only
+starts the browser there; it never starts or stops the display. This
+repository does not install or change either of them.
+The Ansible role creates the store only after checking that the disk is
+mounted, so an unmounted disk is never mistaken for an empty store. The store's
+root is mode 0711, so the login user can reach `profile/` without being able to
+list the store.
+
+### Signing in
+
+```sh
+sudo <deploy dir>/login-session start    # pauses fetching, opens the login browser
+# open the host's desktop and sign in (below)
+sudo <deploy dir>/login-session stop     # saves the login, resumes fetching
+sudo <deploy dir>/login-session status   # shows the marker, the login browser,
+                                         # crawl4ai and the profile owner
+```
+
+For example, on a host whose desktop is a VNC server listening on a unix
+socket:
+
+1. `ssh <host> sudo /opt/searxng-crawl4ai-mcp/login-session start`
+2. Open the host's desktop on display `:1` by whatever means the host offers.
+   Today that is its VNC desktop: keep a tunnel open with
+   `ssh -N -L 5901:/run/vnc-desktop/vnc.sock <login user>@<host>`
+3. ...and connect a VNC client to `localhost:5901`. There is no VNC password;
+   SSH is the gate.
+4. Sign in in the Chrome window that `start` opened (a blank tab). The
+   desktop's autostart also opens a Chrome on the default profile; do not
+   confuse the two. Open `chrome://version` and use the window whose "Profile
+   Path" is `<store>/profile/Default`.
+5. `ssh <host> sudo /opt/searxng-crawl4ai-mcp/login-session stop`. It prints
+   `Login saved. Fetching has resumed.`; the VNC client and the tunnel can then
+   be closed.
+
+`start` refuses to run when the host's Chrome and the crawler's Chromium have
+different major versions, because both write to the same profile and a newer
+major version can change its on-disk format. It prints both versions. Either
+update `CRAWL4AI_SESSION_IMAGE` to a build with the same major version as the
+host's Chrome, or hold the host's Chrome until the crawler catches up
+(`sudo apt-mark hold google-chrome-stable`).
+
+`start` stops crawl4ai first because a Chromium profile can be opened by only
+one browser at a time. On each site, tick "keep me signed in" (or its
+equivalent): without it many sites issue a session cookie with no expiry,
+which the browser does not save when it closes, so the login would not survive
+`stop`.
+
+To remove one site's login and keep the others, run `start`, open
+`chrome://settings/content/all` in the login browser, delete that site's data
+(or sign out on the site), then run `stop`.
+
+### While a login is in progress
+
+Between `start` and the end of `stop`, fetches fail with `loginInProgress`
+rather than looking like an outage. Do not deploy during that time: crawl4ai
+refuses to start while a login is in progress, so the deployment's
+`up --wait` cannot complete.
+
+### Limitations
+
+- A site that shows its login form inside the member page, instead of
+  redirecting to a login page, cannot be detected as logged out.
+- `web_extract` uses the login but does not detect an expired one, because it
+  does not return the final URL.
+- Other clients that use crawl4ai directly through the host's port 11235 (such
+  as mcp-ec) get the same login, and the `browser_config` they send is ignored.
+- During a login, those direct clients cannot reach crawl4ai either.
+- While pages are fetched, the profile is owned by uid/gid 999, which may be
+  an unrelated host user (such as `dnsmasq`); that user can read the profile too (see Security).
+- When apt upgrades the host's Google Chrome to a new major version,
+  `login-session start` stops at the version check. Update
+  `CRAWL4AI_SESSION_IMAGE` to match, or `sudo apt-mark hold google-chrome-stable`.
+
+### Security
+
+- This feature opens no new network listener. The login browser appears on
+  the host's existing VNC desktop, which listens only on a Unix socket that
+  only its owner can open (mode 0600, no TCP). Reaching it requires SSH as that
+  user, so SSH is the gate, and the VNC traffic stays inside the SSH tunnel.
+- The login browser runs with `--password-store=basic`. The VNC session runs a
+  keyring, and without this flag Chrome encrypts cookies with the keyring's
+  key, which the crawler's Chromium does not have, so the crawler could not
+  read the login. With it, cookies are encrypted with Chromium's fixed
+  built-in key, so the profile is protected only by its file permissions.
+  You can check which key was used: the first three bytes of
+  `encrypted_value` in `<store>/profile/Default/Cookies` are `v10` for the
+  fixed key and `v11` for a keyring key.
+- While pages are fetched, the profile belongs to uid/gid 999 (the crawl4ai
+  container's user). If uid 999 is an existing host user (such as `dnsmasq`), that
+  user's processes can read the profile, cookies included. This risk is accepted: changing the
+  container's uid would mean re-owning every directory the upstream image
+  writes to.
+- The login applies to every URL this server fetches. Anyone who can call the
+  MCP endpoint can read pages as the signed-in member, so sign in only to
+  accounts whose pages you are prepared to expose to those callers.
+
+### Recovery
+
+- If the host reboots during a login, the login browser is gone, crawl4ai
+  stays stopped and the marker stays at `login`, so fetches keep failing with
+  `loginInProgress`. Run `login-session stop` to recover: it returns the
+  profile to the crawler and starts crawl4ai. `login-session status` shows the
+  state first.
+- Rolling `CRAWL4AI_SESSION_IMAGE` back to an older build can leave a profile
+  that the older Chromium cannot open, because a newer Chromium has already
+  written to it. Empty `profile/` and sign in again. Only upgrades are covered
+  by the guarantee that logins survive an image update.
+
 ## Connecting Claude Code
 
 Two installers register this checkout with Claude Code as a plugin. Neither

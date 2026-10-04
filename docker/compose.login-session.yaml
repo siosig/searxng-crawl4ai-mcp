@@ -1,0 +1,30 @@
+# Persistent login sessions, as a separate overlay.
+#
+# This keeps the crawl4ai browser profile (cookies, local storage) on a host
+# directory, LOGIN_SESSION_ROOT, so a site signed in once stays signed in
+# across container restarts. It also tells mcp where the login marker lives
+# (read-only), so the MCP tools answer loginInProgress instead of fetching
+# while a person is signing in. The Ansible mcp_stack role includes this file
+# only when mcp_login_session_root is set; a deployment without it mounts no
+# session directory.
+#
+# The signing in itself happens outside the stack: the host command
+# `login-session` stops crawl4ai and opens the same profile in the host's own
+# Chrome on its existing VNC desktop, because the two must never hold the
+# profile at the same time (see specs/006-persistent-login-sessions/contracts/).
+#
+#   docker compose --env-file versions.env --env-file .env \
+#     -f docker/compose.yaml -f docker/compose.login-session.yaml up -d
+
+services:
+  crawl4ai:
+    environment:
+      C4AI_SESSION_ROOT: /session
+    volumes:
+      - ${LOGIN_SESSION_ROOT:?LOGIN_SESSION_ROOT is required}:/session
+
+  mcp:
+    environment:
+      LOGIN_STATE_DIR: /run/login-state
+    volumes:
+      - ${LOGIN_SESSION_ROOT:?LOGIN_SESSION_ROOT is required}/state:/run/login-state:ro

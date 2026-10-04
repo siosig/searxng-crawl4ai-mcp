@@ -239,3 +239,59 @@ test("the SearXNG settings switch engines on and off, and define none of them", 
     "only `name` and `disabled` belong here; any other key freezes an upstream engine definition",
   );
 });
+
+// The paths into crawl4ai that run on the shared browser pool. Kept apart
+// from the test so the guard itself can be shown to fail on a source it
+// must reject, without editing src/upstream/crawl4ai.ts to prove it.
+const SHARED_PROFILE_PATHS = ["/crawl/stream", "/crawl/job", "/llm/", "/health"];
+
+function crawl4aiPaths(source: string): { found: string[]; outside: string[] } {
+  // The fixed part of every `base(...)` argument: a plain string, or the head
+  // of a template literal up to its first `${`. `/crawl/job/${id}` is judged
+  // by `/crawl/job/`.
+  const found = [...source.matchAll(/base\(\s*["`]([^"`$]*)/g)].map((match) => match[1]!);
+  const outside = found.filter((path) => !SHARED_PROFILE_PATHS.some((prefix) => path.startsWith(prefix)));
+  return { found, outside };
+}
+
+test("the MCP only calls the crawl4ai endpoints that share one browser profile", () => {
+  // With login sessions on, crawl4ai keeps exactly one browser holding the
+  // profile directory, and it does so by forcing every route that uses the
+  // pool onto one configuration. Some routes - `/llm/job` among them - never
+  // touch the pool: they launch a browser of their own, which then tries to
+  // open the same profile and fails on its SingletonLock (specs/006
+  // research.md R2). Reaching one of those from here would turn every call on
+  // it into an error the moment sessions are enabled.
+  const { found, outside } = crawl4aiPaths(read(join(ROOT, "src/upstream/crawl4ai.ts")));
+  assert.ok(found.length > 0, "no base(...) call found; the guard is no longer reading the client");
+  assert.deepEqual(
+    outside,
+    [],
+    `only ${SHARED_PROFILE_PATHS.join(", ")} run on the shared browser; any other route opens the profile twice`,
+  );
+
+  // And the guard rejects what it is here to reject.
+  assert.deepEqual(crawl4aiPaths('await request(base("/md"), {});').outside, ["/md"]);
+});
+
+test("the MCP never sends a browser_config to crawl4ai", () => {
+  // A browser_config sent with a request is thrown away while login sessions
+  // are on, so it would only look like it does something. With sessions off
+  // it is worse: a different config is a different pool key, and the request
+  // gets a browser of its own beside the shared one (specs/006 research.md R2).
+  const offenders = walk(join(ROOT, "src"), (p) => p.endsWith(".ts")).filter((p) =>
+    read(p).includes("browser_config"),
+  );
+
+  assert.deepEqual(
+    offenders.map((p) => p.replace(ROOT, "")),
+    [],
+    "the browser is crawl4ai's to configure; the MCP sends crawler settings only",
+  );
+});
+
+test("the crawl4ai session image is declared in versions.env", () => {
+  // The image that runs crawl4ai with the shared profile is built here, not
+  // pulled from upstream, but it follows the same rule: one place names it.
+  assert.match(read(join(ROOT, "versions.env")), /^CRAWL4AI_SESSION_IMAGE=/m);
+});

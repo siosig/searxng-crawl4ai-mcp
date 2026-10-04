@@ -9,8 +9,164 @@
         ' -f compose.local-services.yaml'
         if (mcp_local_searxng_port | default('') | string | length > 0
             or mcp_local_crawl4ai_port | default('') | string | length > 0)
+        else '' }}{{
+        ' -f compose.login-session.yaml'
+        if mcp_login_session_root | default('') | string | length > 0
         else '' }}
   tags: [mcp_stack, configure, deploy]
+
+# crawl4ai runs the session image whether or not logins are in use, so this
+# holds on every host. The placeholder tag in versions.env exists only until CI
+# has pushed the first build; deploying it would fail at pull time anyway.
+- name: Check the crawl4ai session image is a published build
+  ansible.builtin.assert:
+    that:
+      - mcp_session_image.split(':') | last is match('^[0-9a-f]{40}$')
+    fail_msg: >-
+      CRAWL4AI_SESSION_IMAGE in versions.env is '{{ mcp_session_image }}'.
+      Set it to the commit sha that CI pushed (build-image.yml prints the
+      line to use) before deploying.
+    quiet: true
+  vars:
+    mcp_session_image: >-
+      {{ lookup('ansible.builtin.ini', 'CRAWL4AI_SESSION_IMAGE',
+                file=playbook_dir ~ '/../versions.env',
+                type='properties', errors='ignore') | default('', true) }}
+  tags: [mcp_stack, configure, deploy]
+
+# The login-session command runs mcp_login_browser as mcp_login_user on the
+# host's display (mcp_login_display). Checking the host here turns a wrong value into a failed
+# deploy rather than a login-session start that fails on the day it is needed.
+# The user is checked for emptiness first: getent with an empty key would list
+# the whole passwd database instead of failing.
+- name: Check the login session root and user are set
+  ansible.builtin.assert:
+    that:
+      - mcp_login_session_root is match('^/.*[^/]$')
+      - mcp_login_user | default('') | string | length > 0
+    fail_msg: >-
+      mcp_login_session_root must be an absolute path without a trailing
+      slash, and it needs mcp_login_user (the user the login browser runs as).
+    quiet: true
+  when: mcp_login_session_root | default('') | string | length > 0
+  tags: [mcp_stack, configure, login_session]
+
+# fail_key is off so that a missing user reaches the assert below, which says
+# what is wrong; getent then records the key with a null value.
+- name: Look up the login user
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ mcp_login_user }}"
+    fail_key: false
+  when: mcp_login_session_root | default('') | string | length > 0
+  tags: [mcp_stack, configure, login_session]
+
+# follow: /usr/bin/google-chrome is a symlink through /etc/alternatives.
+- name: Look for the login browser
+  ansible.builtin.stat:
+    path: "{{ mcp_login_browser }}"
+    follow: true
+  register: mcp_login_browser_stat
+  when: mcp_login_session_root | default('') | string | length > 0
+  tags: [mcp_stack, configure, login_session]
+
+- name: Check the login session settings
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['getent_passwd'][mcp_login_user] is not none
+      - mcp_login_browser_stat.stat.exists
+      - mcp_login_browser_stat.stat.executable
+    fail_msg: >-
+      The login session needs the user mcp_login_user ({{ mcp_login_user }})
+      to exist on this host and mcp_login_browser ({{ mcp_login_browser }})
+      to be an executable file. The "assertion" field shows which failed.
+    quiet: true
+  when: mcp_login_session_root | default('') | string | length > 0
+  tags: [mcp_stack, configure, login_session]
+
+# The store holds every site's signed-in state, so it belongs on the session
+# disk. If that disk is not mounted, creating the directories would silently
+# put them on the root filesystem underneath the mountpoint instead.
+- name: Confirm the session disk is mounted
+  ansible.builtin.command:
+    cmd: mountpoint -q {{ mcp_login_session_mountpoint | quote }}
+  become: true
+  register: mcp_session_disk
+  changed_when: false
+  failed_when: false
+  # Read-only, so it runs in a dry run too; the asserts below need its rc.
+  check_mode: false
+  when:
+    - mcp_login_session_root | default('') | string | length > 0
+    - mcp_login_session_mountpoint | default('') | string | length > 0
+  tags: [mcp_stack, configure, login_session]
+
+- name: Refuse to create the login session store off the session disk
+  ansible.builtin.assert:
+    that:
+      - mcp_session_disk.rc == 0
+    fail_msg: >-
+      {{ mcp_login_session_mountpoint }} is not mounted; refusing to create
+      the login session store on the root filesystem
+    quiet: true
+  when:
+    - mcp_login_session_root | default('') | string | length > 0
+    - mcp_login_session_mountpoint | default('') | string | length > 0
+  tags: [mcp_stack, configure, login_session]
+
+# The trailing slash is stripped first so that a mountpoint of / still works.
+- name: Refuse a login session root outside the session disk
+  ansible.builtin.assert:
+    that:
+      - >-
+        mcp_login_session_root.startswith(
+        (mcp_login_session_mountpoint | regex_replace('/+$', '')) ~ '/')
+      - mcp_login_session_root is not search('/\.\.(/|$)')
+    fail_msg: >-
+      mcp_login_session_root ({{ mcp_login_session_root }}) must be inside
+      mcp_login_session_mountpoint ({{ mcp_login_session_mountpoint }})
+    quiet: true
+  when:
+    - mcp_login_session_root | default('') | string | length > 0
+    - mcp_login_session_mountpoint | default('') | string | length > 0
+  tags: [mcp_stack, configure, login_session]
+
+# Ownership follows data-model.md section 1. state/ is world-readable because
+# the MCP (a different uid) mounts it read-only to see the marker. The root
+# gives others search (x) but not read: during a login the host's Chrome runs
+# as mcp_login_user and must reach profile/, but needs no listing of the root.
+- name: Create the login session store
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ mcp_login_session_root | dirname }}", owner: root, mode: '0755' }
+    - { path: "{{ mcp_login_session_root }}", owner: "{{ mcp_login_session_uid }}", mode: '0711' }
+    - { path: "{{ mcp_login_session_root }}/profile", owner: "{{ mcp_login_session_uid }}", mode: '0700' }
+    - { path: "{{ mcp_login_session_root }}/state", owner: "{{ mcp_login_session_uid }}", mode: '0755' }
+  loop_control:
+    label: "{{ item.path }}"
+  become: true
+  when: mcp_login_session_root | default('') | string | length > 0
+  tags: [mcp_stack, configure, login_session]
+
+# The containers refuse to start without this file, which is how they tell the
+# real store from an empty directory left behind by a missing disk. It is made
+# only after the mount check above, and never rewritten once it exists.
+- name: Mark the login session store
+  ansible.builtin.copy:
+    content: ""
+    dest: "{{ mcp_login_session_root }}/state/.session-root"
+    owner: "{{ mcp_login_session_uid }}"
+    group: "{{ mcp_login_session_uid }}"
+    mode: '0640'
+    force: false
+  become: true
+  when: mcp_login_session_root | default('') | string | length > 0
+  tags: [mcp_stack, configure, login_session]
 
 - name: Ensure the deployment directory exists
   ansible.builtin.file:
@@ -63,6 +219,49 @@
     mode: '0640'
   become: true
   notify: Restart the MCP stack
+  tags: [mcp_stack, configure]
+
+- name: Copy the login-session compose overlay
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../docker/compose.login-session.yaml"
+    dest: "{{ mcp_deploy_dir }}/compose.login-session.yaml"
+    owner: root
+    group: root
+    mode: '0640'
+  become: true
+  notify: Restart the MCP stack
+  when: mcp_login_session_root | default('') | string | length > 0
+  tags: [mcp_stack, configure]
+
+# With the feature off nothing on the host should still refer to the store.
+- name: Remove the login-session compose overlay
+  ansible.builtin.file:
+    path: "{{ mcp_deploy_dir }}/compose.login-session.yaml"
+    state: absent
+  become: true
+  notify: Restart the MCP stack
+  when: mcp_login_session_root | default('') | string | length == 0
+  tags: [mcp_stack, configure]
+
+# The script bakes in mcp_compose_files, so it must come after the task that
+# decides them.
+- name: Install the login-session command
+  ansible.builtin.template:
+    src: login-session.sh.j2
+    dest: "{{ mcp_deploy_dir }}/login-session"
+    owner: root
+    group: root
+    mode: '0750'
+  become: true
+  when: mcp_login_session_root | default('') | string | length > 0
+  tags: [mcp_stack, configure]
+
+- name: Remove the login-session command
+  ansible.builtin.file:
+    path: "{{ mcp_deploy_dir }}/login-session"
+    state: absent
+  become: true
+  when: mcp_login_session_root | default('') | string | length == 0
   tags: [mcp_stack, configure]
 
 - name: Copy the SearXNG settings

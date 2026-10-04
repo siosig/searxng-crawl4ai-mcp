@@ -42,7 +42,11 @@ export type FailureKind =
    * only this server can judge is a tool execution error and belongs here. The
    * SDK enforces the first half; this kind is the second.
    */
-  | "invalidInput";
+  | "invalidInput"
+  /** A manual login is in progress on the server; fetching is paused until it ends. */
+  | "loginInProgress"
+  /** The target sent the request to a sign-in page; the saved login is missing or has expired. */
+  | "loginRequired";
 
 export interface ToolFailure {
   readonly kind: FailureKind;

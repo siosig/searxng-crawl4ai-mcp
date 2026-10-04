@@ -160,6 +160,22 @@ export function recordSlots(inUse: number, limit: number): void {
   });
 }
 
+/**
+ * Whether this deployment keeps manual logins. Set once at startup, so a
+ * dashboard can tell "no logins configured" apart from "logins all expired".
+ */
+export function recordLoginSessionEnabled(enabled: boolean): void {
+  safely(() => {
+    m.loginSessionEnabled.set(enabled ? 1 : 0);
+  });
+}
+
+export function recordLoginRequired(): void {
+  safely(() => {
+    m.loginRequired.inc();
+  });
+}
+
 export function recordConcurrencyRejection(): void {
   safely(() => {
     m.concurrencyRejected.inc();

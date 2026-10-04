@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import * as z from "zod/v4";
 import {
   DEFAULT_MAX_CONCURRENT_FETCHES,
@@ -86,6 +87,13 @@ const BaseEnvSchema = z.object({
 
   // Unset means connect directly. When set, it applies to every outbound call.
   PROXY_URL: optionalNonEmpty,
+
+  // When set, fetching pauses while a manual login is in progress there.
+  // compose.login-session.yaml sets it; a plain deployment leaves it unset.
+  LOGIN_STATE_DIR: optionalNonEmpty.refine(
+    (v) => v === undefined || path.isAbsolute(v),
+    "LOGIN_STATE_DIR must be an absolute path",
+  ),
 
   // Widens the outbound policy. It can never narrow it - the denied ranges are
   // compiled in and are not reachable from configuration.

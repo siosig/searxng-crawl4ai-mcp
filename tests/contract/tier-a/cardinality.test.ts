@@ -60,7 +60,7 @@ const CEILING: Record<string, number> = {
   // reasons. See src/metrics/normalize.ts.
   [ENGINE_METRIC]: 41 * 5,
   mcp_tool_calls_total: 8 * 2, // eight tools x {success, failure}
-  mcp_tool_failures_total: 8 * 10, // eight tools x ten FailureKind values
+  mcp_tool_failures_total: 8 * 11, // eight tools x eleven FailureKind values
   mcp_tool_duration_seconds: 8 * (9 + 1 + 2), // nine buckets + Inf + sum + count
   mcp_search_results_total: 2,
   mcp_documents_total: 2,
@@ -71,6 +71,9 @@ const CEILING: Record<string, number> = {
   mcp_fetch_slots_in_use: 1,
   mcp_fetch_slots_limit: 1,
   mcp_concurrency_rejected_total: 1,
+  // Login sessions (specs/006): no labels, so one series each.
+  mcp_login_session_enabled: 1,
+  mcp_login_required_total: 1,
 };
 
 /** Strip labels and the histogram suffix, leaving the metric a series belongs to. */

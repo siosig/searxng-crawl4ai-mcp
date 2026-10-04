@@ -126,3 +126,15 @@ export const searchShortfall = new Counter({
   labelNames: ["reason"] as const,
   registers: [registry],
 });
+
+export const loginSessionEnabled = new Gauge({
+  name: "mcp_login_session_enabled",
+  help: "1 when this deployment keeps manual logins for fetching, 0 when it does not.",
+  registers: [registry],
+});
+
+export const loginRequired = new Counter({
+  name: "mcp_login_required_total",
+  help: "Pages that came back as a sign-in page, meaning the saved login is missing or has expired.",
+  registers: [registry],
+});

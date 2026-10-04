@@ -97,19 +97,52 @@ jobs:
             up -d --force-recreate --wait --wait-timeout 180 mcp
           pnpm exec tsx --test "tests/contract/tier-a/degraded.test.ts"
 
+      # specs/006-persistent-login-sessions. Laid out as the Ansible mcp_stack
+      # role lays out the real store: owned by crawl4ai's appuser (999), the
+      # profile private to it, state/ readable by mcp (uid 1000) through its
+      # read-only mount, and the .session-root marker that every component
+      # refuses to start without.
+      - name: Verify logins persist in the session profile
+        env:
+          MCP_ENDPOINT: http://127.0.0.1:3003/mcp
+          FIXTURE_ORIGIN: http://fixture-site
+          METRICS_URL: http://127.0.0.1:9464/metrics
+          LOGIN_SESSION_CONTRACT: "1"
+        run: |
+          root="$RUNNER_TEMP/login-session"
+          sudo install -d -o 999 -g 999 -m 0711 "$root"
+          sudo install -d -o 999 -g 999 -m 0700 "$root/profile"
+          sudo install -d -o 999 -g 999 -m 0755 "$root/state"
+          sudo install -o 999 -g 999 -m 0640 /dev/null "$root/state/.session-root"
+          echo "LOGIN_SESSION_ROOT=$root" >> .env
+          set -a; . ./.env; set +a
+          COMPOSE_ARGS="--env-file versions.env --env-file .env -f docker/compose.yaml -f docker/compose.test.yaml -f docker/compose.metrics.yaml -f docker/compose.login-session.yaml"
+          export COMPOSE_ARGS
+          # shellcheck disable=SC2086 # COMPOSE_ARGS is a word list on purpose.
+          docker compose $COMPOSE_ARGS up -d --force-recreate --wait --wait-timeout 300 crawl4ai mcp
+          pnpm exec tsx --test tests/contract/session/login-session.test.ts
+
+      # The login overlay requires LOGIN_* to be set, which only happens in the
+      # step above; include it only once .env has them, so a failure earlier in
+      # the job still gets its logs and its tear down.
       - name: Container logs on failure
         if: failure()
         run: |
+          login=()
+          if grep -qs '^LOGIN_SESSION_ROOT=' .env; then login=(-f docker/compose.login-session.yaml); fi
           docker compose --env-file versions.env --env-file .env \
-            -f docker/compose.yaml -f docker/compose.test.yaml -f docker/compose.metrics.yaml \
+            -f docker/compose.yaml -f docker/compose.test.yaml -f docker/compose.metrics.yaml "${login[@]}" \
             logs --tail 200
 
       - name: Tear down
         if: always()
         run: |
+          login=()
+          if grep -qs '^LOGIN_SESSION_ROOT=' .env; then login=(-f docker/compose.login-session.yaml); fi
           docker compose --env-file versions.env --env-file .env \
-            -f docker/compose.yaml -f docker/compose.test.yaml -f docker/compose.metrics.yaml \
+            -f docker/compose.yaml -f docker/compose.test.yaml -f docker/compose.metrics.yaml "${login[@]}" \
             down -v || true
+          sudo rm -rf "$RUNNER_TEMP/login-session"
 
   tier-b:
     name: Tier B - live internet (reported, not gating)

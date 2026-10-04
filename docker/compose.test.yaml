@@ -20,6 +20,7 @@ services:
     image: ${NGINX_IMAGE}
     volumes:
       - ../tests/fixtures/site:/usr/share/nginx/html:ro
+      - ../tests/fixtures/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       stack:
         ipv4_address: 172.28.5.10
@@ -34,6 +35,15 @@ services:
       - "127.0.0.1:${DEV_SEARXNG_PORT:-8081}:8080"
 
   crawl4ai:
+    # Built from the working tree for the same reason as the mcp image below:
+    # the tests must exercise the derivation under review, not the last one
+    # that happened to be published.
+    image: searxng-crawl4ai-mcp-crawl4ai:contract-test
+    pull_policy: build
+    build:
+      context: ./crawl4ai
+      args:
+        CRAWL4AI_IMAGE: ${CRAWL4AI_IMAGE}
     environment:
       CRAWL4AI_ALLOW_INTERNAL_URLS: "true"
     ports:

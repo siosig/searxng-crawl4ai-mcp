@@ -7,6 +7,8 @@ import {
   metricsEnabled,
   recordConcurrencyRejection,
   recordDocuments,
+  recordLoginRequired,
+  recordLoginSessionEnabled,
   recordSearch,
   recordSlots,
   recordSearchShortfall,
@@ -16,7 +18,7 @@ import {
   type RetryReason,
   type ShortfallReasonLabel,
 } from "../../src/metrics/record.js";
-import { registry } from "../../src/metrics/registry.js";
+import { loginRequired, registry } from "../../src/metrics/registry.js";
 
 /**
  * These are the tests that make "metrics never break the server" a fact rather
@@ -170,6 +172,41 @@ test("what is recorded while enabled actually lands", async () => {
   assert.match(text, /mcp_tool_calls_total\{tool="web_scrape",result="failure"\}/);
   assert.match(text, /mcp_tool_failures_total\{tool="web_scrape",kind="egressDenied"\}/);
   assert.match(text, /mcp_documents_total\{result="ok"\}/);
+
+  disableMetrics();
+});
+
+test("the login-session gauge reads 1 once recorded while enabled", async () => {
+  enableMetrics();
+  recordLoginSessionEnabled(true);
+
+  const text = await registry.metrics();
+  assert.match(text, /^mcp_login_session_enabled 1$/m);
+
+  disableMetrics();
+});
+
+test("the login-session gauge is left alone while metrics are disabled", async () => {
+  // Pin a known value first: a gauge with no labels is always exported, so
+  // "nothing recorded" can only be seen as "the value did not move".
+  enableMetrics();
+  recordLoginSessionEnabled(false);
+  disableMetrics();
+
+  recordLoginSessionEnabled(true);
+
+  const text = await registry.metrics();
+  assert.match(text, /^mcp_login_session_enabled 0$/m);
+});
+
+test("a page that came back as a sign-in page is counted once recorded while enabled", async () => {
+  // Start from zero so the assertion does not depend on test order.
+  loginRequired.reset();
+  enableMetrics();
+  recordLoginRequired();
+
+  const text = await registry.metrics();
+  assert.match(text, /^mcp_login_required_total 1$/m);
 
   disableMetrics();
 });

@@ -110,3 +110,36 @@ test("a fully configured http environment still validates", () => {
 
   setEnvForTest(null);
 });
+
+test("a relative LOGIN_STATE_DIR refuses to start", () => {
+  // Relative to whatever the working directory happens to be, the gate would
+  // look in a place the login tooling never writes to and silently stay open.
+  const { code, stderr } = refusedToStart({
+    ...UPSTREAM,
+    MCP_TRANSPORT: "stdio",
+    LOGIN_STATE_DIR: "login-state",
+  });
+
+  assert.equal(code, 1);
+  assert.match(stderr, /LOGIN_STATE_DIR must be an absolute path/);
+});
+
+test("an absolute LOGIN_STATE_DIR is accepted", () => {
+  const config = validateEnv({
+    ...UPSTREAM,
+    MCP_TRANSPORT: "stdio",
+    LOGIN_STATE_DIR: "/login-state",
+  });
+
+  assert.equal(config.LOGIN_STATE_DIR, "/login-state");
+
+  setEnvForTest(null);
+});
+
+test("an unset LOGIN_STATE_DIR stays undefined", () => {
+  const config = validateEnv({ ...UPSTREAM, MCP_TRANSPORT: "stdio" });
+
+  assert.equal(config.LOGIN_STATE_DIR, undefined);
+
+  setEnvForTest(null);
+});

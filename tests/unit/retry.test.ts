@@ -152,6 +152,8 @@ test("stage 2 classifies exactly the failures the contract lists", () => {
     "llmUnavailable",
     "upstreamUnavailable",
     "blocked",
+    "loginInProgress",
+    "loginRequired",
   ] as const) {
     assert.equal(kind(k), null, `${k} does not become true by asking again`);
   }

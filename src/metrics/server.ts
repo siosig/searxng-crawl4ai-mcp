@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { registry } from "./registry.js";
-import { enableMetrics } from "./record.js";
+import { enableMetrics, recordLoginSessionEnabled } from "./record.js";
+import { loginSessionEnabled } from "../upstream/login-session.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -69,6 +70,7 @@ export function startMetricsServer(
 
   server.listen(port, host, () => {
     enableMetrics();
+    recordLoginSessionEnabled(loginSessionEnabled());
     logger.info({ port, host }, "metrics listening");
   });
 

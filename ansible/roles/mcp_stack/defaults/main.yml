@@ -37,3 +37,24 @@ mcp_metrics_port: ""
 # out of).
 mcp_local_searxng_port: ""
 mcp_local_crawl4ai_port: ""
+
+# Login sessions (specs/006-persistent-login-sessions). Empty root means the
+# feature is off: the login-session overlay is not used and no login-session
+# command is installed. The mountpoint, when set, must be mounted and must
+# contain the root, so the store is never created on the root filesystem by a
+# missing disk.
+mcp_login_session_mountpoint: ""
+mcp_login_session_root: ""
+
+# The login browser is the host's own Chrome, run as mcp_login_user on the X
+# display mcp_login_display, so nothing new listens on the network. Providing
+# that display (and the way to see it) is left to the host; this stack only
+# points the browser at it. The user is required when the root is set and must
+# be one that may draw on the display.
+mcp_login_user: ""
+mcp_login_display: ":1"
+mcp_login_browser: "/usr/bin/google-chrome"
+
+# Owner (uid and gid) of the login session store: appuser in the crawl4ai
+# image. Change it only when the image changes.
+mcp_login_session_uid: 999

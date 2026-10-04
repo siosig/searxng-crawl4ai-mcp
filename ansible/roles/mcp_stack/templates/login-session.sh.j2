@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+# Managed by Ansible. Do not edit on the host - changes are overwritten.
+#
+# login-session - start and stop the browser used to sign in to sites.
+#
+#   sudo {{ mcp_deploy_dir }}/login-session {start|stop|status}
+#
+# The login browser is the host's own Chrome, shown on the host's existing
+# display (how that display is provided and reached is the host's business,
+# not this stack's), and crawl4ai opens the same browser profile, so the two
+# must never run together. start stops crawl4ai before the browser comes up; stop brings
+# crawl4ai back only after the browser is gone. The marker file
+# state/login-in-progress tells crawl4ai and the MCP which phase is current.
+#
+# Contract: specs/006-persistent-login-sessions/contracts/login-session-cli.md
+#
+# errtrace (-E) is on so that a failure inside a function (marker_set) still
+# reaches the ERR trap that start installs for its rollback.
+set -Eeuo pipefail
+
+usage() {
+  echo 'usage: login-session {start|stop|status}' >&2
+  exit 2
+}
+
+# Checked before anything touches the host, so a typo never has side effects.
+[[ $# -eq 1 ]] || usage
+case "$1" in
+  start | stop | status) ;;
+  *) usage ;;
+esac
+
+if [[ "$(id -u)" != 0 ]]; then
+  echo 'login-session: run with sudo.' >&2
+  exit 1
+fi
+
+DEPLOY={{ mcp_deploy_dir | quote }}
+ROOT={{ mcp_login_session_root | quote }}
+LOGIN_USER={{ mcp_login_user | quote }}
+DISPLAY_NUM={{ mcp_login_display | quote }}
+BROWSER={{ mcp_login_browser | quote }}
+COMPOSE=(docker compose --env-file versions.env --env-file .env {{ mcp_compose_files }})
+
+cd "$DEPLOY"
+
+UNIT=c4ai-login-browser
+MARKER="$ROOT/state/login-in-progress"
+PROFILE="$ROOT/profile"
+# appuser in the crawl4ai image (data-model.md section 1).
+CRAWLER_UID=999
+CRAWLER_GID=999
+
+# Written through a temporary file and renamed, so crawl4ai and the MCP never
+# read a half-written value.
+marker_set() {
+  printf '%s\n' "$1" >"$MARKER.tmp"
+  chown "$CRAWLER_UID:$CRAWLER_GID" "$MARKER.tmp"
+  chmod 0644 "$MARKER.tmp"
+  mv -f "$MARKER.tmp" "$MARKER"
+}
+
+marker_clear() {
+  rm -f "$MARKER" "$MARKER.tmp"
+}
+
+# Reads a file baked into the crawl4ai image. A one-off container is used so
+# this works while crawl4ai itself is stopped.
+image_file() {
+  "${COMPOSE[@]}" run --rm --no-deps -T --entrypoint cat crawl4ai "$1"
+}
+
+# First run of digits followed by a dot, e.g. "Google Chrome 151.0.7922.137"
+# gives 151. Prints nothing when there is none.
+major() {
+  if [[ "$1" =~ ([0-9]+)\. ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}
+
+# Invoked through `trap rollback ERR` in cmd_start. Every step runs even if an
+# earlier one fails: the aim is to leave crawl4ai running and the profile
+# owned by it whatever state start got to.
+# shellcheck disable=SC2329
+rollback() {
+  trap - ERR
+  set +e
+  systemctl stop "$UNIT"
+  chown -R "$CRAWLER_UID:$CRAWLER_GID" "$PROFILE"
+  marker_clear
+  "${COMPOSE[@]}" up -d --no-deps crawl4ai
+  echo 'login-session: start failed; the login browser was stopped and crawl4ai was started again.' >&2
+  exit 1
+}
+
+cmd_start() {
+  if [[ ! -e "$ROOT/state/.session-root" ]]; then
+    echo "login-session: $ROOT/state/.session-root is missing; the session disk is not mounted or not prepared." >&2
+    exit 1
+  fi
+
+  local entry home gid
+  if ! entry="$(getent passwd "$LOGIN_USER")"; then
+    echo "login-session: user $LOGIN_USER does not exist." >&2
+    exit 1
+  fi
+  home="$(cut -d: -f6 <<<"$entry")"
+  # Its own assignment: inside an argument of systemd-run a failing id would
+  # be ignored by errexit.
+  if ! gid="$(id -g "$LOGIN_USER")"; then
+    echo "login-session: cannot read the primary group of $LOGIN_USER." >&2
+    exit 1
+  fi
+
+  if [[ ! -x "$BROWSER" ]]; then
+    echo "login-session: $BROWSER is not installed." >&2
+    exit 1
+  fi
+
+  if systemctl is-active --quiet "$UNIT"; then
+    echo 'login-session: a login session is already running; finish it with "login-session stop".' >&2
+    exit 1
+  fi
+
+  # Both sides write the profile, and Chromium upgrades its on-disk formats
+  # per major version, so a mismatch in either direction can lose cookies.
+  local crawler host
+  if ! crawler="$(image_file /opt/c4ai-session/chromium-version)"; then
+    echo 'login-session: cannot read /opt/c4ai-session/chromium-version from the crawl4ai image.' >&2
+    exit 1
+  fi
+  if ! host="$("$BROWSER" --version)"; then
+    echo "login-session: $BROWSER --version failed." >&2
+    exit 1
+  fi
+  local crawler_major host_major
+  crawler_major="$(major "$crawler")"
+  host_major="$(major "$host")"
+  if [[ -z "$host_major" || "$host_major" != "$crawler_major" ]]; then
+    cat >&2 <<EOF
+login-session: the login browser and the crawler must share a major version.
+  login browser: $host
+  crawler:       $crawler
+Update CRAWL4AI_SESSION_IMAGE to a build with the same major version, or hold the
+host's Chrome package (apt-mark hold google-chrome-stable) until the crawler catches up.
+EOF
+    exit 1
+  fi
+
+  # The same user agent as the crawler, for sites that bind a session to it.
+  local ua
+  if ! ua="$(image_file /opt/c4ai-session/user-agent)" || [[ -z "$ua" ]]; then
+    echo 'login-session: cannot read /opt/c4ai-session/user-agent from the crawl4ai image.' >&2
+    exit 1
+  fi
+
+  trap rollback ERR
+  marker_set login
+  "${COMPOSE[@]}" stop crawl4ai
+  # A lock left by the other host name (the container) makes Chrome refuse
+  # the profile as in use by another computer. Removing it is safe because the
+  # steps above guarantee nothing else has the profile open.
+  rm -f "$PROFILE"/Singleton{Lock,Socket,Cookie}
+  chown -R "$LOGIN_USER:" "$PROFILE"
+  # --collect unloads the unit even when Chrome exits non-zero, so a failed
+  # run cannot block the next start with "unit already exists".
+  # --password-store=basic keeps cookies readable by the crawler, which has
+  # no keyring (research.md R6).
+  systemd-run --unit="$UNIT" --collect --uid="$LOGIN_USER" --gid="$gid" \
+    -p TimeoutStopSec=30 -p KillMode=mixed \
+    -E DISPLAY="$DISPLAY_NUM" -E HOME="$home" \
+    "$BROWSER" --user-data-dir="$PROFILE" --password-store=basic \
+    --no-first-run --no-default-browser-check --user-agent="$ua" about:blank
+  trap - ERR
+
+  cat <<EOF
+Login browser is running on display $DISPLAY_NUM as $LOGIN_USER.
+  Sign in from the host's desktop (display $DISPLAY_NUM).
+  Fetching through crawl4ai is paused until you run: login-session stop
+Tick "keep me signed in" on each site so the login survives a browser restart.
+EOF
+  exit 0
+}
+
+cmd_stop() {
+  # Not active is fine: stop also recovers from a marker left behind.
+  if systemctl is-active --quiet "$UNIT"; then
+    systemctl stop "$UNIT"
+  fi
+  if [[ -d "$PROFILE" ]]; then
+    chown -R "$CRAWLER_UID:$CRAWLER_GID" "$PROFILE"
+  fi
+  marker_set resuming
+  if ! "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 300 crawl4ai; then
+    echo 'login-session: crawl4ai did not become healthy; the marker is left as "resuming" so the MCP keeps answering loginInProgress. Check: docker compose logs crawl4ai' >&2
+    exit 1
+  fi
+  marker_clear
+  echo 'Login saved. Fetching has resumed.'
+  exit 0
+}
+
+cmd_status() {
+  local marker_value=none
+  if [[ -f "$MARKER" ]]; then
+    marker_value="$(cat "$MARKER")"
+  fi
+
+  # is-active exits non-zero for every state but active, after printing it.
+  local browser
+  browser="$(systemctl is-active "$UNIT")" || true
+
+  # -a: crawl4ai is stopped (not running) during a login, and plain `ps`
+  # lists running containers only.
+  local crawl4ai_state
+  crawl4ai_state="$("${COMPOSE[@]}" ps -a --format '{% raw %}{{.State}}{% endraw %}' crawl4ai)" || crawl4ai_state=unknown
+
+  local owner=missing
+  if [[ -e "$PROFILE" ]]; then
+    owner="$(stat -c %U:%G "$PROFILE")"
+  fi
+
+  echo "marker: ${marker_value}"
+  echo "login-browser: ${browser}"
+  echo "crawl4ai: ${crawl4ai_state}"
+  echo "profile owner: ${owner}"
+  exit 0
+}
+
+case "$1" in
+  start) cmd_start ;;
+  stop) cmd_stop ;;
+  status) cmd_status ;;
+esac

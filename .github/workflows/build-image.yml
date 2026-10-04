@@ -42,8 +42,25 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Read the pinned crawl4ai image
+        run: grep '^CRAWL4AI_IMAGE=' versions.env >> "$GITHUB_ENV"
+
+      - name: Build and push the crawl4ai session image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/crawl4ai
+          push: true
+          # crawl4ai 0.9 does not accept a browser profile over the network, so
+          # this minimal derived image lets it use saved logins (see specs/006).
+          # The target host never builds, so CI produces this image too.
+          tags: ghcr.io/${{ github.repository }}-crawl4ai:${{ github.sha }}
+          build-args: CRAWL4AI_IMAGE=${{ env.CRAWL4AI_IMAGE }}
+          cache-from: type=gha,scope=crawl4ai
+          cache-to: type=gha,mode=max,scope=crawl4ai
+
       - name: How to deploy this image
         run: |
-          echo "Set MCP_IMAGE in versions.env to:"
-          echo "  ghcr.io/${{ github.repository }}:${{ github.sha }}"
+          echo "Set MCP_IMAGE and CRAWL4AI_SESSION_IMAGE in versions.env to:"
+          echo "  MCP_IMAGE=ghcr.io/${{ github.repository }}:${{ github.sha }}"
+          echo "  CRAWL4AI_SESSION_IMAGE=ghcr.io/${{ github.repository }}-crawl4ai:${{ github.sha }}"
           echo "then run the Ansible playbook."
