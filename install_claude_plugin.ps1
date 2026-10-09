@@ -251,6 +251,7 @@ Done.
   endpoint : $Endpoint
   scope    : $Scope
   tools    : $($McpTools.Count) (web_search, web_scrape, web_crawl, ...)
+  skill    : /crawl-search (searches and reads pages through these tools)
 
 Restart Claude Code to pick the tools up.
 ------------------------------------------------------------------

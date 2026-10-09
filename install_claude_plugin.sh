@@ -222,6 +222,7 @@ Done.
   endpoint : ${ENDPOINT}
   scope    : ${SCOPE}
   tools    : ${#MCP_TOOLS[@]} (web_search, web_scrape, web_crawl, ...)
+  skill    : /crawl-search (searches and reads pages through these tools)
 
 Restart Claude Code to pick the tools up.
 ------------------------------------------------------------------

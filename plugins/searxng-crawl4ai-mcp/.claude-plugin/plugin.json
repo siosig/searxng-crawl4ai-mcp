@@ -1,6 +1,6 @@
 {
   "name": "searxng-crawl4ai-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Self-hosted web search and page fetching. Talks to your own SearXNG and Crawl4AI through a remote MCP server, so no request leaves your infrastructure for a commercial API. Prefer over WebFetch when reading web pages.",
   "author": {
     "name": "self-hosted"
