@@ -72,45 +72,47 @@
   when: comment_supported.rc != 0
   tags: [egress_guard, security]
 
-- name: Allow the deliberately permitted destinations first
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    source: "{{ egress_guard_source_subnet }}"
-    destination: "{{ item }}"
-    jump: RETURN
-    action: insert
-    comment: "{{ (egress_guard_comment ~ ' (allowed)') if comment_supported.rc == 0 else omit }}"
-    state: present
-  loop: "{{ egress_guard_allowed_destinations }}"
+- name: Install the script that applies the egress rules
+  ansible.builtin.template:
+    src: mcp-egress-guard.sh.j2
+    dest: /usr/local/sbin/mcp-egress-guard
+    owner: root
+    group: root
+    mode: "0750"
   become: true
+  notify: Reapply the egress rules
   tags: [egress_guard, security]
 
-- name: Drop traffic from the stack to private destinations
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    source: "{{ egress_guard_source_subnet }}"
-    destination: "{{ item }}"
-    jump: DROP
-    action: append
-    comment: "{{ egress_guard_comment if comment_supported.rc == 0 else omit }}"
-    state: present
-  loop: "{{ egress_guard_blocked_destinations }}"
+- name: Install the unit that applies them after Docker starts
+  ansible.builtin.template:
+    src: mcp-egress-guard.service.j2
+    dest: /etc/systemd/system/mcp-egress-guard.service
+    owner: root
+    group: root
+    mode: "0644"
   become: true
+  notify: Reapply the egress rules
   tags: [egress_guard, security]
 
-- name: Persist the rules across reboots
-  ansible.builtin.package:
-    name: iptables-persistent
-    state: present
+- name: Enable the unit so the rules return after a reboot
+  ansible.builtin.systemd:
+    name: mcp-egress-guard.service
+    enabled: true
+    daemon_reload: true
   become: true
-  when: ansible_os_family == "Debian"
+  when: not ansible_check_mode
   tags: [egress_guard, security]
 
-- name: Save the rules
-  ansible.builtin.command:
-    cmd: netfilter-persistent save
+# Apply now rather than at the end of the play: the stack must not run
+# unfiltered while later roles work.
+- name: Apply the rules now
+  ansible.builtin.meta: flush_handlers
+  tags: [egress_guard, security]
+
+- name: Make sure the unit is active
+  ansible.builtin.systemd:
+    name: mcp-egress-guard.service
+    state: started
   become: true
-  register: egress_save
-  changed_when: false
-  when: ansible_os_family == "Debian" and not ansible_check_mode
+  when: not ansible_check_mode
   tags: [egress_guard, security]

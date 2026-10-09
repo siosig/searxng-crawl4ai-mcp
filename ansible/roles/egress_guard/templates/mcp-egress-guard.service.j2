@@ -1,0 +1,17 @@
+# Managed by Ansible (egress_guard).
+# DOCKER-USER is recreated empty at every boot, and the host's saved ruleset
+# cannot be relied on to restore it: it also holds rules that reference ipsets
+# other services create later, so the whole file is rejected at boot.
+[Unit]
+Description=MCP stack egress rules (DOCKER-USER)
+After=docker.service network-online.target
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/mcp-egress-guard
+
+[Install]
+WantedBy=multi-user.target

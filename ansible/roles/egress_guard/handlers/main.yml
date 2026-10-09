@@ -1,0 +1,8 @@
+---
+- name: Reapply the egress rules
+  ansible.builtin.systemd:
+    name: mcp-egress-guard.service
+    state: restarted
+    daemon_reload: true
+  become: true
+  when: not ansible_check_mode
