@@ -308,6 +308,33 @@
   notify: Restart the MCP stack
   tags: [mcp_stack, configure]
 
+# runc writes the container's memory.swap.max straight into the cgroup, and any
+# `systemctl daemon-reload` on the host (user services trigger them often)
+# resets it to "max". A limit on the parent slice is a real unit property, so
+# it survives reloads, recreation and reboots, and the kernel enforces it for
+# every cgroup below it. The name has no dash: a dash would nest the slice.
+- name: Install the crawl4ai slice that forbids swap
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible. Do not edit on the host - changes are overwritten.
+      [Slice]
+      MemorySwapMax=0
+    dest: /etc/systemd/system/{{ mcp_crawl4ai_slice }}
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  register: mcp_crawl4ai_slice_unit
+  tags: [mcp_stack, configure]
+
+# Before the container is created, so that it starts inside the slice.
+- name: Reload systemd after the slice changed
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  when: mcp_crawl4ai_slice_unit is changed
+  tags: [mcp_stack, configure]
+
 # The remaining tasks act on the host rather than describing it, so a dry run
 # reports them instead of pretending to run them. Without this, `--check` fails
 # on the first docker command because the directory it would run in was only
@@ -357,5 +384,17 @@
     body_format: json
     body: {}
     status_code: 401
+  when: not ansible_check_mode
+  tags: [mcp_stack, deploy, verify]
+
+# The container's own memory.swap.max is not trustworthy (see above); the slice
+# is what enforces the cap, so that is what gets checked.
+- name: Read the swap limit of the crawl4ai slice
+  ansible.builtin.command:
+    cmd: cat /sys/fs/cgroup/{{ mcp_crawl4ai_slice }}/memory.swap.max
+  become: true
+  register: mcp_crawl4ai_slice_swap
+  changed_when: false
+  failed_when: mcp_crawl4ai_slice_swap.stdout | trim != '0'
   when: not ansible_check_mode
   tags: [mcp_stack, deploy, verify]

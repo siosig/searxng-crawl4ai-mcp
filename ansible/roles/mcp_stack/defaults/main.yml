@@ -13,6 +13,10 @@ mcp_max_concurrent_fetches: 2
 # takes the whole host down.
 mcp_crawl4ai_mem_limit: 2g
 
+# systemd slice the crawl4ai container runs in; it carries MemorySwapMax=0. Must
+# match cgroup_parent in docker/compose.yaml, and must not contain a dash.
+mcp_crawl4ai_slice: mcpcrawl4ai.slice
+
 # Attempts against an upstream, including the first. Retrying only ever
 # absorbs failures that came back quickly and never adds more than two seconds
 # to a call, so the default is safe on a low-power host. Set it to 1 to switch

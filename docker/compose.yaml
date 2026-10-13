@@ -75,6 +75,11 @@ services:
     # capped at the same value so the browser cannot spill into host swap.
     mem_limit: ${CRAWL4AI_MEM_LIMIT:-2g}
     memswap_limit: ${CRAWL4AI_MEM_LIMIT:-2g}
+    # memswap_limit alone is not enough on a systemd host: a daemon-reload
+    # resets the container's swap cap to unlimited. The Ansible mcp_stack role
+    # installs this slice with MemorySwapMax=0, which a reload cannot undo.
+    # Without the role the name is simply a fresh slice with no extra limit.
+    cgroup_parent: mcpcrawl4ai.slice
     networks:
       stack:
         aliases: [crawl4ai]
