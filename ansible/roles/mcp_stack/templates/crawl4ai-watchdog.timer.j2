@@ -1,0 +1,11 @@
+# Managed by Ansible. Do not edit on the host - changes are overwritten.
+[Unit]
+Description=Probe the crawl4ai browser
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec={{ mcp_crawl4ai_watchdog_interval }}
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

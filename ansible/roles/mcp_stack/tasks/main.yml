@@ -335,6 +335,44 @@
   when: mcp_crawl4ai_slice_unit is changed
   tags: [mcp_stack, configure]
 
+- name: Install the crawl4ai watchdog
+  ansible.builtin.copy:
+    src: crawl4ai-watchdog.sh
+    dest: "{{ mcp_deploy_dir }}/crawl4ai-watchdog"
+    owner: root
+    group: root
+    mode: '0750'
+  become: true
+  tags: [mcp_stack, configure]
+
+- name: Install the crawl4ai watchdog units
+  ansible.builtin.template:
+    src: "crawl4ai-watchdog.{{ item }}.j2"
+    dest: "/etc/systemd/system/crawl4ai-watchdog.{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [service, timer]
+  become: true
+  register: mcp_watchdog_units
+  tags: [mcp_stack, configure]
+
+- name: Reload systemd after the watchdog units changed
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  when: mcp_watchdog_units is changed
+  tags: [mcp_stack, configure]
+
+- name: Run the crawl4ai watchdog timer
+  ansible.builtin.systemd:
+    name: crawl4ai-watchdog.timer
+    enabled: "{{ mcp_crawl4ai_watchdog_enabled | bool }}"
+    state: "{{ 'started' if mcp_crawl4ai_watchdog_enabled | bool else 'stopped' }}"
+  become: true
+  when: not ansible_check_mode or mcp_watchdog_units is not changed
+  tags: [mcp_stack, configure]
+
 # The remaining tasks act on the host rather than describing it, so a dry run
 # reports them instead of pretending to run them. Without this, `--check` fails
 # on the first docker command because the directory it would run in was only

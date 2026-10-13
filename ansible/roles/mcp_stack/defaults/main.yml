@@ -13,6 +13,15 @@ mcp_max_concurrent_fetches: 2
 # takes the whole host down.
 mcp_crawl4ai_mem_limit: 2g
 
+# Browser watchdog: a host timer that renders an inline page in the crawl4ai
+# container and restarts it after this many consecutive failures. The failures
+# are spaced by the interval, so the defaults restart after about ten minutes
+# of a dead browser. Set enabled to false to stop the timer.
+mcp_crawl4ai_watchdog_enabled: true
+mcp_crawl4ai_watchdog_interval: 5min
+mcp_crawl4ai_watchdog_failures: 3
+mcp_crawl4ai_container: searxng-crawl4ai-mcp-crawl4ai-1
+
 # systemd slice the crawl4ai container runs in; it carries MemorySwapMax=0. Must
 # match cgroup_parent in docker/compose.yaml, and must not contain a dash.
 mcp_crawl4ai_slice: mcpcrawl4ai.slice

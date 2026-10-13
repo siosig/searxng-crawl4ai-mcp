@@ -1,0 +1,14 @@
+# Managed by Ansible. Do not edit on the host - changes are overwritten.
+[Unit]
+Description=Restart the crawl4ai container when its browser stops answering
+After=docker.service
+
+[Service]
+Type=oneshot
+Environment=WATCHDOG_CONTAINER={{ mcp_crawl4ai_container }}
+Environment=WATCHDOG_THRESHOLD={{ mcp_crawl4ai_watchdog_failures }}
+{% if mcp_login_session_root | default('') | string | length > 0 %}
+Environment=WATCHDOG_LOGIN_MARKER={{ mcp_login_session_root }}/state/login-in-progress
+{% endif %}
+ExecStart={{ mcp_deploy_dir }}/crawl4ai-watchdog
+TimeoutStartSec=300
