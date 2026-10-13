@@ -22,5 +22,9 @@ observability_scrape_interval: 15s
 # "every container on the host".
 observability_container_regex: "searxng-crawl4ai-mcp-(mcp|searxng|crawl4ai)-[0-9]+"
 
+# The systemd slice the crawl4ai container runs in; it is what the container's
+# memory metrics are keyed on. Must match mcp_crawl4ai_slice in mcp_stack.
+observability_crawl4ai_slice: mcpcrawl4ai.slice
+
 # The user the collector runs as, used only to check journal access.
 observability_collector_user: alloy

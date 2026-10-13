@@ -26,6 +26,36 @@ prometheus.scrape "searxng_crawl4ai_mcp" {
   forward_to      = [prometheus.relabel.drop_metrics.receiver]
 }
 
+// The crawl4ai container's memory, read from its cgroup. The collector user is
+// not in the docker group, so containers are not named; the slice that the
+// mcp_stack role puts the container in is the stable identifier instead
+// (id="/{{ observability_crawl4ai_slice }}"). Only memory is enabled, and only
+// this slice is kept, so nothing else on the host is collected.
+prometheus.exporter.cadvisor "searxng_crawl4ai_mcp" {
+  docker_only                 = true
+  raw_cgroup_prefix_allowlist = ["/{{ observability_crawl4ai_slice }}"]
+  store_container_labels      = false
+  enabled_metrics             = ["memory"]
+  storage_duration            = "2m"
+}
+
+prometheus.scrape "searxng_crawl4ai_mcp_cgroup" {
+  targets         = prometheus.exporter.cadvisor.searxng_crawl4ai_mcp.targets
+  scrape_interval = "{{ observability_scrape_interval }}"
+  job_name        = "{{ observability_job }}-cgroup"
+  forward_to      = [prometheus.relabel.searxng_crawl4ai_mcp_cgroup.receiver]
+}
+
+prometheus.relabel "searxng_crawl4ai_mcp_cgroup" {
+  forward_to = [prometheus.relabel.drop_metrics.receiver]
+
+  rule {
+    source_labels = ["id"]
+    regex         = "/{{ observability_crawl4ai_slice }}(/.*)?"
+    action        = "keep"
+  }
+}
+
 // --- Logs ------------------------------------------------------------------
 // The stack's containers log through the journald driver, so their output is
 // already in the journal - the server needs no shipping configuration of its
