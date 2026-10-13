@@ -67,6 +67,14 @@ services:
     # Chromium needs more shared memory than Docker's 64MB default; without
     # this it crashes on content-heavy pages.
     shm_size: 1gb
+    # The pooled login-profile browser is never recycled (Crawl4AI's recycling
+    # only covers isolated contexts) and its footprint grows over days; on
+    # a small host it reached 2.6GB and OOM-killed the whole host. A
+    # cap makes that OOM a container-local one, and also gives Crawl4AI's own
+    # memory_threshold_percent a real denominator instead of host RAM. Swap is
+    # capped at the same value so the browser cannot spill into host swap.
+    mem_limit: ${CRAWL4AI_MEM_LIMIT:-2g}
+    memswap_limit: ${CRAWL4AI_MEM_LIMIT:-2g}
     networks:
       stack:
         aliases: [crawl4ai]
