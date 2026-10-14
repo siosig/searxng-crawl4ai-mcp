@@ -22,6 +22,16 @@ mcp_crawl4ai_watchdog_interval: 5min
 mcp_crawl4ai_watchdog_failures: 3
 mcp_crawl4ai_container: searxng-crawl4ai-mcp-crawl4ai-1
 
+# Daily restart while idle. The login-profile browser is never recycled and
+# grows with its uptime: before the memory cap it held about 1GB of RAM plus
+# 2GB of swap after 4.8 days, roughly 0.6GB a day (an estimate from that one
+# sample, not a fit), so a restart a day keeps it well under the 2g cap. Each
+# listed time is a retry; the first one that finds the browser idle restarts,
+# and the others do nothing for 20 hours. Revisit once the container memory
+# metrics show the real growth rate.
+mcp_crawl4ai_scheduled_restart_enabled: true
+mcp_crawl4ai_scheduled_restart_calendar: "*-*-* 04,05,06:00:00"
+
 # systemd slice the crawl4ai container runs in; it carries MemorySwapMax=0. Must
 # match cgroup_parent in docker/compose.yaml, and must not contain a dash.
 mcp_crawl4ai_slice: mcpcrawl4ai.slice

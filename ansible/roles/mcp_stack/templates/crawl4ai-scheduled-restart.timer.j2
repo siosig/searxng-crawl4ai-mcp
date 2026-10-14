@@ -1,0 +1,10 @@
+# Managed by Ansible. Do not edit on the host - changes are overwritten.
+[Unit]
+Description=Daily idle restart of the crawl4ai container
+
+[Timer]
+OnCalendar={{ mcp_crawl4ai_scheduled_restart_calendar }}
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

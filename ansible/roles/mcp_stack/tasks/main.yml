@@ -347,12 +347,12 @@
 
 - name: Install the crawl4ai watchdog units
   ansible.builtin.template:
-    src: "crawl4ai-watchdog.{{ item }}.j2"
-    dest: "/etc/systemd/system/crawl4ai-watchdog.{{ item }}"
+    src: "{{ 'crawl4ai-watchdog.' ~ item ~ '.j2' if item in ['service', 'timer'] else 'crawl4ai-' ~ item ~ '.j2' }}"
+    dest: "/etc/systemd/system/{{ 'crawl4ai-watchdog.' ~ item if item in ['service', 'timer'] else 'crawl4ai-' ~ item }}"
     owner: root
     group: root
     mode: '0644'
-  loop: [service, timer]
+  loop: [service, timer, scheduled-restart.service, scheduled-restart.timer]
   become: true
   register: mcp_watchdog_units
   tags: [mcp_stack, configure]
@@ -369,6 +369,15 @@
     name: crawl4ai-watchdog.timer
     enabled: "{{ mcp_crawl4ai_watchdog_enabled | bool }}"
     state: "{{ 'started' if mcp_crawl4ai_watchdog_enabled | bool else 'stopped' }}"
+  become: true
+  when: not ansible_check_mode or mcp_watchdog_units is not changed
+  tags: [mcp_stack, configure]
+
+- name: Run the crawl4ai scheduled restart timer
+  ansible.builtin.systemd:
+    name: crawl4ai-scheduled-restart.timer
+    enabled: "{{ mcp_crawl4ai_scheduled_restart_enabled | bool }}"
+    state: "{{ 'started' if mcp_crawl4ai_scheduled_restart_enabled | bool else 'stopped' }}"
   become: true
   when: not ansible_check_mode or mcp_watchdog_units is not changed
   tags: [mcp_stack, configure]
