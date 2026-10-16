@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Slots } from "../../src/utils/semaphore.js";
 import { truncate } from "../../src/utils/format.js";
-import { isAuthorized, isOriginAllowed, bearerToken } from "../../src/security/auth.js";
+import { hostHeaderValidationResponse, originValidationResponse } from "@modelcontextprotocol/server";
+import { isAuthorized, bearerToken } from "../../src/security/auth.js";
 import { UpstreamError, toFailure, failure, type ToolFailure } from "../../src/utils/errors.js";
 import { reply, replyFailure } from "../../src/tools/shared.js";
 import { CHARACTER_LIMIT } from "../../src/constants.js";
@@ -63,22 +64,37 @@ test("bearer tokens are parsed and compared exactly", () => {
   assert.equal(isAuthorized("", secret), false);
 });
 
+/**
+ * Whether the SDK's validators, which src/transport/http.ts calls, admit a
+ * request with these headers. The checks are the SDK's rather than ours, so
+ * this pins the behaviour the listener relies on across SDK upgrades.
+ */
+function admitted(allowed: string[], host: string | null, origin?: string): boolean {
+  const headers = new Headers();
+  if (host !== null) headers.set("host", host);
+  if (origin !== undefined) headers.set("origin", origin);
+  const req = new Request("http://placeholder/mcp", { headers });
+  return !hostHeaderValidationResponse(req, allowed) && !originValidationResponse(req, allowed);
+}
+
 test("host and origin are checked against the allow-list", () => {
   const allowed = ["mcp.example.com", "localhost"];
 
-  assert.equal(isOriginAllowed("mcp.example.com", undefined, allowed), true);
-  assert.equal(isOriginAllowed("mcp.example.com:8443", undefined, allowed), true, "the port is not a security property");
-  assert.equal(isOriginAllowed("evil.example.net", undefined, allowed), false);
+  assert.equal(admitted(allowed, "mcp.example.com"), true);
+  assert.equal(admitted(allowed, "mcp.example.com:8443"), true, "the port is not a security property");
+  assert.equal(admitted(allowed, "evil.example.net"), false);
+  assert.equal(admitted(allowed, null), false, "a request without Host is refused");
 
   // A browser-driven rebinding attempt carries an Origin we never listed.
-  assert.equal(isOriginAllowed("mcp.example.com", "https://evil.example.net", allowed), false);
-  assert.equal(isOriginAllowed("mcp.example.com", "https://mcp.example.com", allowed), true);
+  assert.equal(admitted(allowed, "mcp.example.com", "https://evil.example.net"), false);
+  assert.equal(admitted(allowed, "mcp.example.com", "https://mcp.example.com"), true);
+  assert.equal(admitted(allowed, "mcp.example.com", "null"), false, "an opaque origin is refused");
 
   // Non-browser clients send no Origin at all; refusing them would break every
   // ordinary MCP client.
-  assert.equal(isOriginAllowed("localhost", undefined, allowed), true);
+  assert.equal(admitted(allowed, "localhost"), true);
 
-  assert.equal(isOriginAllowed("localhost", undefined, []), false, "an empty list allows nothing");
+  assert.equal(admitted([], "localhost"), false, "an empty list allows nothing");
 });
 
 test("connection problems are classified, not lumped together", () => {

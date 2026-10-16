@@ -356,12 +356,3 @@ export async function extract(url: string, instruction: string): Promise<unknown
   });
   return body;
 }
-
-export async function health(): Promise<boolean> {
-  try {
-    await request<unknown>(base("/health"), { method: "GET", timeoutMs: 10_000 });
-    return true;
-  } catch {
-    return false;
-  }
-}

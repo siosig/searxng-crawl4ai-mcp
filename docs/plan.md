@@ -69,7 +69,6 @@ A tool validates input, runs `checkEgress` on target URLs, takes a fetch slot fo
 | SearXNG | `GET /search?format=json&...` (`pageno` from 2) | 30 s | yes |
 | Crawl4AI | `POST /crawl/stream` with `{urls, crawler_config}`, ndjson response | 120 s | yes (marked idempotent) |
 | Crawl4AI | `GET /llm/{url}?q=` | 180 s | yes |
-| Crawl4AI | `GET /health` | 10 s | yes; `health` has no caller |
 
 Pages are read through `/crawl/stream`, never `/md`: `/md` returns one status per call and loses a target's 404 behind a 502 carrying anti-bot text, while the stream returns a status and markdown per URL. Each workaround in `src/upstream/crawl4ai.ts` is pinned by a test in `tests/contract/tier-a/upstream.test.ts` that fails when its cause goes away.
 
