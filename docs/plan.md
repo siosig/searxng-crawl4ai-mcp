@@ -24,14 +24,14 @@ The server is a thin composition layer: SearXNG and Crawl4AI run as unmodified u
 | The SearXNG settings define no engines of their own | `design-guards.test.ts` |
 | No `any` | ESLint `@typescript-eslint/no-explicit-any` |
 
-The server keeps no state: no cache, no database. Job state, if any, lives in Crawl4AI.
+The server keeps no state: no cache, no database, no background jobs.
 
 ## Module layout
 
 | Path | Responsibility |
 |---|---|
-| `src/index.ts` | Entry: `validateEnv`, choose the transport, start the metrics listener (http only) |
-| `src/server.ts` | `buildServer` registers the eight tools on a fresh `McpServer`; `TOOL_NAMES` |
+| `src/index.ts` | Entry: `validateEnv`, apply the validated `LOG_LEVEL` to the logger (built at import with `info`, because pino throws on an unknown level before validation could report it), choose the transport, start the metrics listener (http only) |
+| `src/server.ts` | `buildServer` registers the seven tools on a fresh `McpServer`; `TOOL_NAMES` |
 | `src/tools/` | One file per tool plus `shared.ts` (fetch slots, outbound check, `guarded` wrapper that records metrics, `reply`) |
 | `src/schemas/tools.ts` | zod input schemas |
 | `src/transport/` | `http.ts` (listener, Host/Origin check, bearer auth) and `stdio.ts` |
@@ -53,7 +53,7 @@ flowchart LR
   S -->|checkEgress| E[security/egress.ts]
   S -->|Slots.run| U[upstream/*]
   U -->|GET /search| X[SearXNG]
-  U -->|POST /crawl/stream, GET /llm, /crawl/job| K[Crawl4AI]
+  U -->|POST /crawl/stream, GET /llm| K[Crawl4AI]
   K -->|stack subnet, filtered by DOCKER-USER| W[Internet]
   X --> W
 ```
@@ -68,8 +68,6 @@ A tool validates input, runs `checkEgress` on target URLs, takes a fetch slot fo
 |---|---|---|---|
 | SearXNG | `GET /search?format=json&...` (`pageno` from 2) | 30 s | yes |
 | Crawl4AI | `POST /crawl/stream` with `{urls, crawler_config}`, ndjson response | 120 s | yes (marked idempotent) |
-| Crawl4AI | `POST /crawl/job` with `{urls}`, expects 202 | 120 s | never (not idempotent) |
-| Crawl4AI | `GET /crawl/job/{id}` | 120 s | yes |
 | Crawl4AI | `GET /llm/{url}?q=` | 180 s | yes |
 | Crawl4AI | `GET /health` | 10 s | yes; `health` has no caller |
 

@@ -42,10 +42,13 @@ export const ANNOTATIONS = {
  * 50 of these and the text stops part way through them" - the second tells the
  * caller that asking for the machine-readable format would hand back all of
  * them, which the first does not.
+ *
+ * `truncated` is reserved for the size cap and is set here, so `structured`
+ * may not carry one: a tool's own flag under that name would be overwritten.
  */
 export function reply(
   markdown: string,
-  structured: Record<string, unknown>,
+  structured: Record<string, unknown> & { readonly truncated?: never },
   format: Format,
   gathered?: number,
 ): CallToolResult {

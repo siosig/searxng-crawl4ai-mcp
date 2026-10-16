@@ -71,6 +71,24 @@ test("the upstreams stay required under stdio; only the listener's guards are dr
   assert.match(stderr, /CRAWL4AI_API_TOKEN/);
 });
 
+test("a bad LOG_LEVEL is reported by validation, not thrown by the logger at import", () => {
+  // The real entry rather than env.ts alone: the logger is built when index.ts
+  // imports it, before validateEnv() runs, and that ordering is what is pinned.
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/index.ts"],
+    {
+      cwd: ROOT,
+      env: { PATH: process.env.PATH ?? "", ...UPSTREAM, MCP_TRANSPORT: "stdio", LOG_LEVEL: "verbose" },
+      encoding: "utf8",
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Configuration is invalid/);
+  assert.match(result.stderr, /LOG_LEVEL/);
+});
+
 test("an unset transport is still the HTTP entry, and still refuses to start unguarded", () => {
   // The default matters as much as the explicit value: an existing deployment
   // sets no MCP_TRANSPORT at all, and it must not be the one that loses its

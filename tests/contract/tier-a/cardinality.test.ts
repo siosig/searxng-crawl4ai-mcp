@@ -59,13 +59,13 @@ const CEILING: Record<string, number> = {
   // BoundedLabelSet caps engines at 40 and folds the rest into "other"; five
   // reasons. See src/metrics/normalize.ts.
   [ENGINE_METRIC]: 41 * 5,
-  mcp_tool_calls_total: 8 * 2, // eight tools x {success, failure}
-  mcp_tool_failures_total: 8 * 11, // eight tools x eleven FailureKind values
-  mcp_tool_duration_seconds: 8 * (9 + 1 + 2), // nine buckets + Inf + sum + count
+  mcp_tool_calls_total: 7 * 2, // seven tools x {success, failure}
+  mcp_tool_failures_total: 7 * 10, // seven tools x ten FailureKind values
+  mcp_tool_duration_seconds: 7 * (9 + 1 + 2), // nine buckets + Inf + sum + count
   mcp_search_results_total: 2,
   mcp_documents_total: 2,
   mcp_upstream_requests_total: 2 * 2,
-  mcp_upstream_duration_seconds: 2 * 6 * (10 + 1 + 2), // upstream x operation
+  mcp_upstream_duration_seconds: 2 * 4 * (10 + 1 + 2), // upstream x operation
   mcp_upstream_retries_total: 2 * 4,
   mcp_search_shortfall_total: 4,
   mcp_fetch_slots_in_use: 1,

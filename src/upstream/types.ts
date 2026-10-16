@@ -90,12 +90,3 @@ export interface FetchedDocument {
   readonly links: { readonly internal: readonly PageLink[]; readonly external: readonly PageLink[] } | null;
   readonly failure: ToolFailure | null;
 }
-
-export type JobState = "running" | "completed" | "failed";
-
-export interface CrawlJob {
-  readonly jobId: string;
-  readonly state: JobState;
-  readonly documents: readonly FetchedDocument[] | null;
-  readonly failure: ToolFailure | null;
-}

@@ -70,11 +70,11 @@ $RepoDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $EnvFile)           { $EnvFile = Join-Path $RepoDir '.env' }
 if (-not $MarketplaceSource) { $MarketplaceSource = $RepoDir }
 
-# The eight tools this server exposes. Kept in sync with src/server.ts.
+# The seven tools this server exposes. Kept in sync with src/server.ts.
 $ToolPrefix = "mcp__plugin_${MarketplaceName}_${McpServerName}__"
 $McpTools = @(
     'web_search', 'web_scrape', 'web_search_and_scrape', 'web_batch_scrape',
-    'web_crawl', 'web_map', 'web_extract', 'web_job_status'
+    'web_crawl', 'web_map', 'web_extract'
 ) | ForEach-Object { "$ToolPrefix$_" }
 
 function Write-Ok   { param($m) Write-Host "✓ $m" -ForegroundColor Green }

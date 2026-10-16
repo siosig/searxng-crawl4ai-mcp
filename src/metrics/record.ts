@@ -101,8 +101,6 @@ export type UpstreamOperation =
   | "search"
   | "markdown"
   | "crawl"
-  | "submit_job"
-  | "job_status"
   | "extract";
 
 export function recordUpstream(

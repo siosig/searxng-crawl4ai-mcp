@@ -2,9 +2,9 @@ import { request } from "./http.js";
 import { describeLoginPage, isLoginRedirect } from "./login-detect.js";
 import { assertNotLoggingIn } from "./login-session.js";
 import { env } from "../utils/env.js";
-import { failure, UpstreamError, type ToolFailure } from "../utils/errors.js";
+import { failure, type ToolFailure } from "../utils/errors.js";
 import { recordLoginRequired, type UpstreamOperation } from "../metrics/record.js";
-import type { CrawlJob, FetchedDocument, JobState, PageLink } from "./types.js";
+import type { FetchedDocument, PageLink } from "./types.js";
 
 /**
  * Crawl4AI's HTTP API.
@@ -53,22 +53,6 @@ export interface RawCrawlResult {
   readonly links?: unknown;
   readonly metadata?: unknown;
   readonly error_message?: unknown;
-}
-
-interface RawCrawlResponse {
-  readonly success?: unknown;
-  readonly results?: unknown;
-}
-
-interface RawJobSubmit {
-  readonly task_id?: unknown;
-}
-
-interface RawJobStatus {
-  readonly task_id?: unknown;
-  readonly status?: unknown;
-  readonly result?: unknown;
-  readonly error?: unknown;
 }
 
 /** Which markdown variant to trust first. */
@@ -343,99 +327,6 @@ export async function getMarkdown(url: string): Promise<FetchedDocument> {
   const [doc] = await crawl([url], { readable: true, operation: "markdown" });
   // A single-page read has never returned links; keep its output that size.
   return { ...doc!, links: null };
-}
-
-/** Submit an asynchronous crawl. Answers 202 with a task id. */
-export async function submitCrawlJob(urls: readonly string[]): Promise<string> {
-  assertNotLoggingIn();
-  const { body } = await request<RawJobSubmit>(base("/crawl/job"), {
-    method: "POST",
-    token: token(),
-    body: { urls: [...urls] },
-    expect: [202],
-    // No `idempotent` here, and that is the point. This is the one call that
-    // creates something: a retry after a failure that the server had in fact
-    // accepted would leave a second job running, and the caller would only ever
-    // learn the id of one of them - the other would crawl on unowned. A
-    // transient failure surfacing to the caller is the cheaper outcome.
-    upstream: "crawl4ai",
-    operation: "submit_job",
-  });
-
-  const id = str(body.task_id);
-  if (!id) {
-    throw new UpstreamError(
-      failure("upstreamUnavailable", "The scraping backend accepted the job but returned no task id."),
-    );
-  }
-  return id;
-}
-
-/**
- * Map the upstream's TaskStatus (processing | completed | failed) onto ours.
- *
- * Unknown values are treated as still running rather than as a failure: a new
- * intermediate state added upstream should make the caller poll again, not
- * make it report a crawl that is still working as broken.
- */
-function jobState(status: string): JobState {
-  const s = status.toLowerCase();
-  if (s === "completed" || s === "success") return "completed";
-  if (s === "failed" || s === "error") return "failed";
-  return "running";
-}
-
-/**
- * Poll a job.
- *
- * The status body carries a `_links` object, which is deliberately ignored: it
- * was observed pointing at `.../\/llm/<crawl id>` - a doubled slash and the
- * wrong route - so the polling URL is built here instead. (The submit response
- * carries no `_links` at all, only the task id.) Pinned by "the job status body
- * still links to the wrong route".
- */
-export async function getJobStatus(jobId: string): Promise<CrawlJob> {
-  assertNotLoggingIn();
-  const { body } = await request<RawJobStatus>(
-    base(`/crawl/job/${encodeURIComponent(jobId)}`),
-    { method: "GET", token: token(), upstream: "crawl4ai", operation: "job_status" },
-  ).catch((error: unknown) => {
-    // An unknown id is a caller mistake, not an upstream fault. Reporting it
-    // as an HTTP error would send the agent looking for an outage.
-    if (error instanceof UpstreamError && error.failure.upstreamStatus === 404) {
-      throw new UpstreamError(
-        failure("invalidInput", `No crawl job with id "${jobId}". It may have expired.`, 404),
-      );
-    }
-    throw error;
-  });
-
-  const state = jobState(str(body.status, "running"));
-
-  if (state === "failed") {
-    return {
-      jobId,
-      state,
-      documents: null,
-      failure: failure("httpError", str(body.error, "The crawl failed upstream.")),
-    };
-  }
-
-  if (state === "running") {
-    return { jobId, state, documents: null, failure: null };
-  }
-
-  const result = (body.result ?? {}) as RawCrawlResponse;
-  const rawResults = Array.isArray(result.results)
-    ? (result.results as RawCrawlResult[])
-    : [];
-
-  return {
-    jobId,
-    state,
-    documents: rawResults.map((r) => toDocument(r, str(r.url))),
-    failure: null,
-  };
 }
 
 /**

@@ -30,11 +30,9 @@ export type FailureKind =
   | "concurrencyLimit"
   /** SearXNG or Crawl4AI is down or misconfigured. Needs an operator. */
   | "upstreamUnavailable"
-  /** No LLM credentials configured. Extraction degrades rather than fails. */
-  | "llmUnavailable"
   /**
    * An argument was well-formed but cannot be acted on - a URL that parses but
-   * is not crawlable, a job id that does not exist.
+   * is not crawlable.
    *
    * Not for arguments of the wrong shape. The protocol splits those apart: a
    * value that violates the advertised input schema is a malformed request and

@@ -28,7 +28,11 @@ const REDACTED_PATHS = [
 
 export const logger = pino(
   {
-    level: process.env.LOG_LEVEL ?? "info",
+    // Not process.env.LOG_LEVEL: this runs at import, before validateEnv(), and
+    // pino throws on a level it does not know - an empty or misspelt value
+    // would crash here instead of being reported. index.ts applies the
+    // validated level.
+    level: "info",
     // Credentials must never reach a log line, an error response or a
     // diagnostic dump - including when someone logs a whole config object.
     redact: { paths: REDACTED_PATHS, censor: "[redacted]" },

@@ -165,34 +165,6 @@ test("deep crawling is still refused, which is why the crawl loop exists here", 
   );
 });
 
-test("the asynchronous job route accepts work and can be polled", async () => {
-  const submit = await fetch(`${CRAWL4AI}/crawl/job`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
-    body: JSON.stringify({ urls: [process.env.FIXTURE_PROBE ?? "http://fixture-site/index.html"] }),
-  });
-  assert.equal(submit.status, 202);
-
-  const { task_id: taskId } = (await submit.json()) as { task_id?: string };
-  assert.ok(taskId, "no task id returned");
-
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const poll = await fetch(`${CRAWL4AI}/crawl/job/${taskId}`, {
-      headers: { authorization: `Bearer ${TOKEN}` },
-    });
-    assert.equal(poll.status, 200);
-    // Crawl4AI's TaskStatus enum is processing | completed | failed. Anything
-    // outside that set is a contract change worth failing on.
-    const status = (await poll.json()) as { status?: string };
-    if (status.status !== "processing") {
-      assert.equal(status.status, "completed", `unexpected terminal status "${status.status}"`);
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
-  }
-  assert.fail("the job never finished");
-});
-
 // ---------------------------------------------------------------------------
 // The guards below pin the reason each remaining workaround exists. A workaround
 // nobody re-checks is a guess that outlives its cause; these fail the day the
@@ -200,27 +172,6 @@ test("the asynchronous job route accepts work and can be polled", async () => {
 // ---------------------------------------------------------------------------
 
 const AUTH = { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" };
-
-test("the job status body still links to the wrong route, which is why the polling URL is built here", async () => {
-  const submit = await fetch(`${CRAWL4AI}/crawl/job`, {
-    method: "POST",
-    headers: AUTH,
-    body: JSON.stringify({ urls: [FIXTURE_PAGE] }),
-  });
-  const { task_id: taskId } = (await submit.json()) as { task_id?: string };
-  assert.ok(taskId, "no task id returned");
-
-  // `_links` is on the status body, not on the submit response (which carries
-  // only the task id). getJobStatus in src/upstream/crawl4ai.ts ignores it.
-  const poll = await fetch(`${CRAWL4AI}/crawl/job/${taskId}`, { headers: AUTH });
-  const body = (await poll.json()) as { _links?: { self?: { href?: string } } };
-  const href = body._links?.self?.href;
-  assert.ok(href, "the status body no longer carries _links - the reason for ignoring it is moot, revisit getJobStatus");
-  assert.ok(
-    !href.includes(`/crawl/job/${taskId}`),
-    `_links now points at the job route (${href}): the polling URL could be taken from upstream instead of built here`,
-  );
-});
 
 test("the extraction route is GET /llm/{url}, the one the documentation does not describe", async () => {
   const res = await fetch(`${CRAWL4AI}/openapi.json`, { headers: AUTH });

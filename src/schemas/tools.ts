@@ -125,11 +125,4 @@ export const ExtractInput = z
   })
   .strict();
 
-export const JobStatusInput = z
-  .object({
-    jobId: z.string().min(1).max(128).describe("Identifier returned by web_crawl."),
-    format: FormatSchema,
-  })
-  .strict();
-
 export type Format = z.infer<typeof FormatSchema>;

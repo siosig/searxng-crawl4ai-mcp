@@ -8,6 +8,7 @@ import { logger } from "./utils/logger.js";
 // with a broken environment and fails on the first tool call is much harder to
 // diagnose than one that refuses to start and says which variable is wrong.
 const config = validateEnv();
+logger.level = config.LOG_LEVEL;
 
 // One process, two front doors onto the same tools. The branch is here rather
 // than in two entry files so that everything below - and everything behind

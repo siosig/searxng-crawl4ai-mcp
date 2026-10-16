@@ -35,8 +35,7 @@ reverse proxy  ->  mcp        this repository; the only code here
                     +-- HTTP -> crawl4ai    official image, unmodified
 ```
 
-Three containers, no database. The server holds no state: crawl job state lives
-in Crawl4AI.
+Three containers, no database. The server holds no state.
 
 ## Tools
 
@@ -49,7 +48,6 @@ in Crawl4AI.
 | `web_crawl` | Crawl a site with depth and page limits |
 | `web_map` | List the URLs under a site |
 | `web_extract` | Pull structured fields out of a page |
-| `web_job_status` | Look up a Crawl4AI background crawl job by id |
 
 Failures are returned, not thrown, and carry a machine-readable reason so the
 caller can tell "the site is down" apart from "that target is not allowed".
@@ -78,7 +76,7 @@ Responses are capped at 25,000 characters and say so when they were cut.
 | Needs a bearer token | yes | no - there is no port to defend |
 | Needs a Host allow-list | yes | no |
 | Reachable from other machines | yes, through a reverse proxy | no |
-| Tools exposed | the same eight | the same eight |
+| Tools exposed | the same seven | the same seven |
 
 Both entries are built from the same server factory, so neither can grow a
 capability the other lacks. `MCP_TRANSPORT` picks between them and defaults to
@@ -304,7 +302,7 @@ refuses to start while a login is in progress, so the deployment's
 
 Two installers register this checkout with Claude Code as a plugin. Neither
 builds anything: the plugin only tells Claude Code where the endpoint is and
-which bearer token to present, then allows the eight tools without a prompt.
+which bearer token to present, then allows the seven tools without a prompt.
 Both read `MCP_PUBLIC_ENDPOINT` and `MCP_PUBLIC_AUTH_TOKEN` (falling back to
 `MCP_AUTH_TOKEN`) from the gitignored `.env`.
 
@@ -324,7 +322,7 @@ Code afterwards.
 
 ## Using with LLMs
 
-All eight tools are exposed to any LLM client that understands MCP. The HTTP transport requires a bearer token; stdio is for local development and single-user setups.
+All seven tools are exposed to any LLM client that understands MCP. The HTTP transport requires a bearer token; stdio is for local development and single-user setups.
 
 ### LLM configuration for structured extraction
 
@@ -355,8 +353,6 @@ Without a key, `web_extract` degrades gracefully and returns the page as markdow
 **Crawling a site**: `web_crawl` follows links from a starting URL up to a depth and page limit. It stays on the same host by default. When a crawl hits a limit, it reports which one, so you know whether to raise the limit or stop.
 
 **Extracting structured data**: `web_extract` pulls specific fields out of a page (e.g. "product name, price, availability") in plain language. When LLM credentials are not configured, it returns the page as markdown and leaves the reading to you.
-
-**Crawl jobs**: `web_crawl` runs to completion within the call and returns the pages directly; it does not return a job id. `web_job_status` looks up a background crawl job that was submitted to Crawl4AI by id; no tool of this server creates such a job.
 
 ### Error handling
 

@@ -19,7 +19,6 @@ const TOOLS = [
   "web_crawl",
   "web_map",
   "web_extract",
-  "web_job_status",
 ];
 
 test("every tool is advertised", async () => {
@@ -81,6 +80,16 @@ test("web_map lists the links without returning the body", async () => {
 
   assert.ok(internal.some((u) => u.includes("product.html")), "internal links are missing");
   assert.ok(external.some((u) => u.includes("example.com")), "external links were requested but not returned");
+  assert.equal(structured.limitReached, false);
+});
+
+test("web_map says when limit cut the list, apart from the size cap", async () => {
+  // The fixture links three internal pages. `truncated` is the response size
+  // cap and is set for every tool; the list limit needs a name of its own.
+  const { structured } = await client.call("web_map", { url: `${FIXTURE}/index.html`, limit: 1 });
+  assert.equal((structured.internal as string[]).length, 1);
+  assert.equal(structured.limitReached, true, "a list cut by limit must say so");
+  assert.equal(structured.truncated, false, "a short list is not a size-capped response");
 });
 
 test("web_crawl follows levels and stops at the page limit", async () => {
@@ -112,12 +121,6 @@ test("web_crawl stays on the starting host", async () => {
   const documents = structured.documents as { url: string }[];
   const hosts = new Set(documents.map((d) => new URL(d.url).host));
   assert.equal(hosts.size, 1, `crawl wandered to ${[...hosts].join(", ")}`);
-});
-
-test("web_job_status rejects an id that does not exist", async () => {
-  const { structured } = await client.call("web_job_status", { jobId: "crawl_nope" });
-  const failure = structured.failure as { kind: string };
-  assert.equal(failure.kind, "invalidInput", "an unknown id is the caller's mistake, not an outage");
 });
 
 test("web_search answers, and says which engines did not", async () => {

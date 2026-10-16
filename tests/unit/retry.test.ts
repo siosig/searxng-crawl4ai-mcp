@@ -149,7 +149,6 @@ test("stage 2 classifies exactly the failures the contract lists", () => {
     "egressDenied",
     "invalidInput",
     "concurrencyLimit",
-    "llmUnavailable",
     "upstreamUnavailable",
     "blocked",
     "loginInProgress",

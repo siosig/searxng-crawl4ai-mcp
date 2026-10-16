@@ -80,7 +80,7 @@ MCP_SERVER_NAME="searxng-crawl4ai"
 
 MARKETPLACE_SOURCE="${SEARXNG_CRAWL4AI_MARKETPLACE_SOURCE:-${REPO_DIR}}"
 
-# The eight tools this server exposes. Kept in sync with src/server.ts.
+# The seven tools this server exposes. Kept in sync with src/server.ts.
 TOOL_PREFIX="mcp__plugin_${MARKETPLACE_NAME}_${MCP_SERVER_NAME}__"
 MCP_TOOLS=(
   "${TOOL_PREFIX}web_search"
@@ -90,7 +90,6 @@ MCP_TOOLS=(
   "${TOOL_PREFIX}web_crawl"
   "${TOOL_PREFIX}web_map"
   "${TOOL_PREFIX}web_extract"
-  "${TOOL_PREFIX}web_job_status"
 )
 
 _require() {

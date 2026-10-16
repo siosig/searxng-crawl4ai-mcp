@@ -32,7 +32,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || pwd)"
 ENV_FILE="${SEARXNG_CRAWL4AI_ENV_FILE:-${REPO_DIR}/.env}"
 SERVER_NAME="searxng-crawl4ai"
 
-# The eight tools this server exposes. Kept in sync with src/server.ts.
+# The seven tools this server exposes. Kept in sync with src/server.ts.
 MCP_TOOLS=(
   "web_search"
   "web_scrape"
@@ -41,7 +41,6 @@ MCP_TOOLS=(
   "web_crawl"
   "web_map"
   "web_extract"
-  "web_job_status"
 )
 
 usage() {

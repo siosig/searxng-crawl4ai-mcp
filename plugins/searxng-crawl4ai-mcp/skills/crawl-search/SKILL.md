@@ -18,7 +18,7 @@ Do not use WebSearch or WebFetch for this task. Those send requests to a commerc
 | Read one known URL | `web_scrape` |
 | Pull named fields from one page (price, stock, date) | `web_extract` with a plain-language `instruction` |
 | See a site's shape | `web_map` |
-| Read many pages of one site | `web_crawl` (set `maxDepth` and `maxPages` low), then `web_job_status` if it returns a job id |
+| Read many pages of one site | `web_crawl` (set `maxDepth` and `maxPages` low) |
 
 `$ARGUMENTS` that is only a URL means `web_scrape`. Anything else starts with `web_search_and_scrape`.
 

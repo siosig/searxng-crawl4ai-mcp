@@ -1,5 +1,5 @@
 ---
-description: "External contract of the searxng-crawl4ai-mcp server: transports, authentication, the eight MCP tools (inputs, outputs, limits), failure kinds, outbound policy, configuration variables and metric names. Read before changing tool behaviour, schemas, error handling, configuration or metrics."
+description: "External contract of the searxng-crawl4ai-mcp server: transports, authentication, the seven MCP tools (inputs, outputs, limits), failure kinds, outbound policy, configuration variables and metric names. Read before changing tool behaviour, schemas, error handling, configuration or metrics."
 updated: 2026-10-16
 keywords: [MCP, tools, web_search, web_scrape, web_crawl, failure kind, FailureKind, env, environment variables, metrics, Prometheus, SSRF, egress]
 ---
@@ -8,7 +8,7 @@ keywords: [MCP, tools, web_search, web_scrape, web_crawl, failure kind, FailureK
 
 ## Overview
 
-The server is an MCP server that exposes eight read-only web tools (search, fetch, crawl, link listing, structured extraction, job lookup) backed by an unmodified SearXNG and an unmodified Crawl4AI, reached only over their documented HTTP APIs. It is stateless. It speaks Streamable HTTP with a bearer token, or stdio, and both transports expose the same eight tools from the same factory (`buildServer` in `src/server.ts`). Failures are returned as values carrying one of eleven failure kinds, never thrown at the client. How the server is built and deployed is in `docs/plan.md`.
+The server is an MCP server that exposes seven read-only web tools (search, fetch, crawl, link listing, structured extraction) backed by an unmodified SearXNG and an unmodified Crawl4AI, reached only over their documented HTTP APIs. It is stateless. It speaks Streamable HTTP with a bearer token, or stdio, and both transports expose the same seven tools from the same factory (`buildServer` in `src/server.ts`). Failures are returned as values carrying one of ten failure kinds, never thrown at the client. How the server is built and deployed is in `docs/plan.md`.
 
 ## Transports and the HTTP endpoint
 
@@ -20,7 +20,7 @@ The server is an MCP server that exposes eight read-only web tools (search, fetc
 | Bearer token (`MCP_AUTH_TOKEN`) | required | not used |
 | Host/Origin allow-list (`MCP_ALLOWED_HOSTS`) | required | not used |
 | Metrics listener (`METRICS_PORT`) | available | never started |
-| Tools | the eight in `TOOL_NAMES` | the same eight |
+| Tools | the seven in `TOOL_NAMES` | the same seven |
 
 The HTTP listener (`startHttpServer` in `src/transport/http.ts`) handles each request in this order:
 
@@ -60,8 +60,7 @@ The listener binds all interfaces on `PORT`. The deployment publishes it on host
 | `blocked` | The target refused automated access (403, 429 or an anti-bot page) | Do not retry immediately |
 | `concurrencyLimit` | All fetch slots are busy ("Concurrency limit") | Retry shortly, or send fewer URLs per call |
 | `upstreamUnavailable` | SearXNG or Crawl4AI is down or misconfigured | Needs an operator |
-| `llmUnavailable` | Declared but never emitted; `web_extract` degrades instead ("Known gaps") | - |
-| `invalidInput` | A well-formed argument that cannot be acted on: an unparsable or uncrawlable URL, an unknown job id | Fix the argument |
+| `invalidInput` | A well-formed argument that cannot be acted on: an unparsable or uncrawlable URL | Fix the argument |
 | `loginInProgress` | A manual login is in progress on the server and fetching is paused ("Logged-in fetching") | Retry after the login ends |
 | `loginRequired` | The target redirected to a sign-in page; the saved login is missing or expired | An operator must log in again |
 
@@ -149,7 +148,7 @@ Output: `{start, state: "completed", pagesFetched, depthReached, stoppedAt, docu
 | `depth` | `maxDepth` was reached; deeper pages were not followed |
 | `exhausted` | Every reachable link within the limits was followed |
 
-Only internal links are followed, fragments are dropped, and only http/https links are kept. A start URL refused by the outbound policy, or not crawlable, is a whole-call failure. Per-page failures stay in `documents`. The tool returns no `jobId` ("Known gaps").
+Only internal links are followed, fragments are dropped, and only http/https links are kept. A start URL refused by the outbound policy, or not crawlable, is a whole-call failure. Per-page failures stay in `documents`. The crawl runs to completion within the call; there is no background mode.
 
 ## Tool web_map
 
@@ -162,7 +161,7 @@ Fetches a page and lists the URLs it links to, without the page body.
 | `includeExternal` | boolean | `false` | |
 | `format` | `"markdown"`/`"json"` | `"markdown"` | |
 
-Output: `{url, internal[], external[]}`, each de-duplicated in page order. Internal links come first up to `limit`; external links fill what remains of `limit`, only when `includeExternal` is true. A failed fetch is a whole-call failure. The flag for "more links exist than `limit`" collides with the size-cap flag ("Known gaps").
+Output: `{url, internal[], external[], limitReached}`, each list de-duplicated in page order. Internal links come first up to `limit`; external links fill what remains of `limit`, only when `includeExternal` is true. `limitReached` is `true` when the page has more links than were returned because of `limit`, and the markdown text then ends with a note to raise `limit`; it is separate from `truncated`, the size-cap flag. A failed fetch is a whole-call failure.
 
 ## Tool web_extract
 
@@ -175,17 +174,6 @@ Pulls fields described in plain language out of a page, using the LLM configured
 | `format` | `"markdown"`/`"json"` | `"markdown"` | |
 
 With `GEMINI_API_KEY` set, the output is `{url, data, degraded: false, markdown: null, failure: null}`, where `data` is the upstream JSON as returned (shape not fixed). The extraction request has a 180-second timeout. Without `GEMINI_API_KEY`, the tool does not fail: it returns `{url, data: null, degraded: true, markdown, failure: null}` with the page's readable markdown, prefixed by a note that no language-model credentials are configured, and `instruction` is unused. `web_extract` does not detect an expired login, because the upstream does not return the final URL.
-
-## Tool web_job_status
-
-Looks up a Crawl4AI background crawl job by id.
-
-| Parameter | Type | Default | Constraint |
-|---|---|---|---|
-| `jobId` | string | required | 1-128 chars |
-| `format` | `"markdown"`/`"json"` | `"markdown"` | |
-
-Output (`CrawlJob`): `{jobId, state, documents, failure}`. `state` is `running`, `completed` or `failed`; upstream `completed`/`success` map to `completed`, `failed`/`error` to `failed`, anything else to `running`. `documents` is non-null only when `completed`. A `failed` job is returned as a value with `failure.kind: "httpError"`, not as a whole-call failure. An unknown id (upstream 404) is a whole-call failure with `invalidInput`. No tool in this server creates a job id ("Known gaps").
 
 ## Outbound request policy
 
@@ -236,7 +224,7 @@ The server reads these variables, validated at startup by `validateEnv` (`src/ut
 | `SCRAPE_ALLOW_CIDRS` | empty | no | Comma-separated CIDRs allowed despite `DENIED_CIDRS` |
 | `MAX_CONCURRENT_FETCHES` | 4 | no | Fetch slots, 1-32 |
 | `RETRY_MAX_ATTEMPTS` | 3 | no | Upstream attempts including the first, 0-5 |
-| `LOG_LEVEL` | `info` | no | pino level `trace`-`fatal`, logged to stderr |
+| `LOG_LEVEL` | `info` | no | pino level `trace`-`fatal`, logged to stderr; applied after validation, so an unknown value is refused at start like any other invalid variable |
 | `METRICS_PORT` | - | no | Starts the metrics listener (http transport only) |
 | `METRICS_HOST` | `127.0.0.1` | no | Metrics bind address |
 
@@ -256,7 +244,7 @@ When `METRICS_PORT` is set and the transport is `http`, a separate unauthenticat
 | `mcp_search_shortfall_total` | counter | `reason` (the `ShortfallReason` values) |
 | `mcp_documents_total` | counter | `result` (`ok`, `failed`) |
 | `mcp_upstream_requests_total` | counter | `upstream`, `result` |
-| `mcp_upstream_duration_seconds` | histogram | `upstream`, `operation` (`search`, `markdown`, `crawl`, `submit_job`, `job_status`, `extract`) |
+| `mcp_upstream_duration_seconds` | histogram | `upstream`, `operation` (`search`, `markdown`, `crawl`, `extract`) |
 | `mcp_upstream_retries_total` | counter | `upstream`, `reason` (`connect`, `http_5xx`, `rate_limited`, `timeout`) |
 | `mcp_fetch_slots_in_use` | gauge | - |
 | `mcp_fetch_slots_limit` | gauge | - |
@@ -264,25 +252,18 @@ When `METRICS_PORT` is set and the transport is `http`, a separate unauthenticat
 | `mcp_login_session_enabled` | gauge | - |
 | `mcp_login_required_total` | counter | - |
 
-A tool result whose `structuredContent.failure` is set counts as a failure in `mcp_tool_calls_total`, including a `failed` job from `web_job_status`.
+A tool result whose `structuredContent.failure` is set counts as a failure in `mcp_tool_calls_total`.
 
 ## Non-goals
 
-- No response cache and no database; job state lives in Crawl4AI.
+- No response cache, no database and no background jobs; every tool answers within its call.
 - No calls into SearXNG or Crawl4AI internals and no deep-crawl strategy sent upstream.
 - No per-site login rules or stored site credentials.
 - No rate limiting, CORS or request-body limit in the HTTP listener; the reverse proxy and the bearer token front it.
 
 ## Known gaps
 
-These are inconsistencies inside the code, recorded as of 2026-10-16. The code's behaviour is what this document specifies.
-
-| Gap | Where |
-|---|---|
-| `web_crawl` is synchronous and returns no `jobId`; `submitCrawlJob` in `src/upstream/crawl4ai.ts` has no caller. `web_job_status` therefore has no way to obtain an id from this server, although its `jobId` description says "Identifier returned by web_crawl" | `src/tools/crawl.ts`, `src/schemas/tools.ts`, `src/tools/job-status.ts` |
-| `llmUnavailable` is declared but never emitted | `src/utils/errors.ts` |
-| In `web_map`, `structuredContent.truncated` is the size-cap flag; the list-limit flag survives only in the text (markdown note, or the JSON text body) | `src/tools/map.ts`, `reply` in `src/tools/shared.ts` |
-| `env().LOG_LEVEL` is validated but the logger reads `process.env.LOG_LEVEL` directly | `src/utils/logger.ts` |
+None are recorded as of 2026-10-16. A gap is an inconsistency inside the code; this document specifies the code's behaviour, and a gap found later is listed here with where it is.
 
 ## References
 

@@ -53,7 +53,7 @@ export function registerMapTool(server: McpServer): void {
           Math.max(0, params.limit - internalUnique.length),
         );
 
-        const truncatedList =
+        const limitReached =
           uniq(internal).length > internalUnique.length ||
           uniq(external).length > externalUnique.length;
 
@@ -66,7 +66,7 @@ export function registerMapTool(server: McpServer): void {
         if (params.includeExternal) {
           lines.push("", `**External (${externalUnique.length})**`, ...externalUnique.map((u) => `- ${u}`));
         }
-        if (truncatedList) {
+        if (limitReached) {
           lines.push("", `_More links exist; raise \`limit\` to see them._`);
         }
 
@@ -76,7 +76,7 @@ export function registerMapTool(server: McpServer): void {
             url: doc.url,
             internal: internalUnique,
             external: externalUnique,
-            truncated: truncatedList,
+            limitReached,
           },
           params.format,
         );
