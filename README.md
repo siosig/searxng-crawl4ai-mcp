@@ -49,7 +49,7 @@ in Crawl4AI.
 | `web_crawl` | Crawl a site with depth and page limits |
 | `web_map` | List the URLs under a site |
 | `web_extract` | Pull structured fields out of a page |
-| `web_job_status` | Check a long-running crawl |
+| `web_job_status` | Look up a Crawl4AI background crawl job by id |
 
 Failures are returned, not thrown, and carry a machine-readable reason so the
 caller can tell "the site is down" apart from "that target is not allowed".
@@ -356,25 +356,26 @@ Without a key, `web_extract` degrades gracefully and returns the page as markdow
 
 **Extracting structured data**: `web_extract` pulls specific fields out of a page (e.g. "product name, price, availability") in plain language. When LLM credentials are not configured, it returns the page as markdown and leaves the reading to you.
 
-**Long-running crawls**: `web_crawl` returns immediately with a `jobId`. Use `web_job_status` to poll for results. The same id always reports the same state, so polling is safe.
+**Crawl jobs**: `web_crawl` runs to completion within the call and returns the pages directly; it does not return a job id. `web_job_status` looks up a background crawl job that was submitted to Crawl4AI by id; no tool of this server creates such a job.
 
 ### Error handling
 
-Every tool returns structured results with a `status` field: `"ok"`, `"failed"`, or `"partial"` (some URLs succeeded, others did not). When status is `"failed"`, a `failure` field describes why:
+A call that fails as a whole returns `isError: true` and `structuredContent.status: "failed"` with a `failure` object (`kind`, `message`, `upstreamStatus`). Tools that fetch several URLs (`web_batch_scrape`, `web_crawl`, `web_search_and_scrape`) succeed as a call and mark each document `"ok"` or `"failed"` with its own `failure`. The most common kinds:
 
-- `"access_denied"` — the target is on a private, loopback, link-local or cloud metadata range
-- `"host_unreachable"` — DNS failed, the connection timed out, or the server is not listening
-- `"http_error"` — the server responded with a 4xx or 5xx status
-- `"parsing_failed"` — the content exists but could not be parsed as HTML or markdown
-- `"response_size_exceeded"` — the response was larger than 25,000 characters (truncated in output)
+- `"egressDenied"` — the target is on a private, loopback, link-local or other denied range, or the scheme is not http/https
+- `"unreachable"` — name resolution or the connection failed
+- `"httpError"` — the target answered 4xx or 5xx, or produced no readable content
+- `"timeout"` — the target did not finish in time
+- `"blocked"` — the target refused automated access (403, 429 or an anti-bot page)
+- `"concurrencyLimit"` — all fetch slots are busy; retry shortly
 
-Distinguish between these when deciding what to do next. "Access denied" means the target is blocked by policy; "host unreachable" means trying again later might work; "http_error" on a 404 means the page does not exist.
+Distinguish between these when deciding what to do next. `egressDenied` means the target is blocked by policy; `unreachable` or `timeout` means trying again later might work; `httpError` with `upstreamStatus` 404 means the page does not exist. Responses longer than 25,000 characters are cut and say so; that is reported as `truncated: true`, not as a failure. The complete list of kinds is in [docs/spec.md](docs/spec.md).
 
 ### Rate limiting and budgets
 
-- Each tool call has a timeout (typically 30 seconds). Requests to SearXNG or Crawl4AI that fail quickly are retried with backoff, but those that exhaust their timeout are not, because repeating them would double the wait.
-- Large crawls may return fewer pages than requested if they hit the page limit, depth limit, or time budget. The response reports which limit was reached.
-- Responses are capped at 25,000 characters. When truncated, the output says so and you can `web_job_status` to retrieve the full results (for crawls) or re-fetch with different parameters.
+- Each upstream request has its own timeout (30 seconds per search result page, 120 seconds for page fetches, 180 seconds for extraction). Requests to SearXNG or Crawl4AI that fail quickly are retried with backoff, but those that exhaust their timeout are not, because repeating them would double the wait.
+- Large crawls may return fewer pages than requested if they hit the page limit or the depth limit. The response reports which limit was reached (`stoppedAt`).
+- Responses are capped at 25,000 characters. When truncated, the output says so; re-fetch with narrower parameters (fewer URLs, a lower page limit, a more specific query).
 
 ## Development
 
