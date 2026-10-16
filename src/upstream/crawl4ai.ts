@@ -9,7 +9,7 @@ import type { FetchedDocument, PageLink } from "./types.js";
 /**
  * Crawl4AI's HTTP API.
  *
- * Everything below was verified against a running Crawl4AI 0.9.3 container
+ * Everything below was verified against a running Crawl4AI 0.9.4 container
  * (its own /openapi.json plus observed responses) rather than taken from the
  * documentation, which disagreed on several points.
  *
@@ -332,7 +332,7 @@ export async function getMarkdown(url: string): Promise<FetchedDocument> {
 /**
  * Structured extraction.
  *
- * The documented `POST /llm/{path}` does not exist in 0.9.3; the real route is
+ * The documented `POST /llm/{path}` does not exist in 0.9.4; the real route is
  * `GET /llm/{url}?q=...`, which the server's own /openapi.json lists. (A
  * `POST /llm/job` route also exists now. It is asynchronous, so a caller
  * waiting on the answer gains nothing from it, and it is not used.) With no
