@@ -148,7 +148,7 @@ Role `mcp_stack`:
 - Creates and validates the login-session store when `mcp_login_session_root` is set, and installs the `login-session` script.
 - Installs the crawl4ai slice, the watchdog and the scheduled restart ("Crawl4AI memory and restarts").
 - Pulls and starts the stack, then verifies: `GET /` answers 200, an unauthenticated `POST /mcp` answers 401, and the slice's `memory.swap.max` is 0.
-- `mcp_max_concurrent_fetches` defaults to 2 here, below the server's own default.
+- `mcp_max_concurrent_fetches` defaults to 4, the same as the server's own default; a low-power host lowers it in `host_vars`.
 
 Role `nginx_proxy` drops a `location = /mcp-searxng-crawl4ai` snippet into an existing `locations.d` directory that proxies to `http://127.0.0.1:<mcp_port>/mcp` with buffering off and 600-second timeouts. The unauthenticated `/` route is not exposed. A snippet that `nginx -t` rejects is rolled back. TLS and the server block are outside this repository.
 

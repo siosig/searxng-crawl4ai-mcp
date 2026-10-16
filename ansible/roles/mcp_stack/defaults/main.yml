@@ -7,7 +7,7 @@ mcp_allowed_hosts: "localhost,127.0.0.1"
 # politeness limit. The default suits a developer machine; a low-power target
 # should override it downwards in host_vars rather than discovering the limit
 # by running out of memory.
-mcp_max_concurrent_fetches: 2
+mcp_max_concurrent_fetches: 4
 
 # Memory and swap cap of the crawl4ai container. Without it a runaway browser
 # takes the whole host down.
