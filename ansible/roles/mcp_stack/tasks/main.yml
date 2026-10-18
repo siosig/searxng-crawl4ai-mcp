@@ -272,7 +272,9 @@
     group: root
     mode: '0640'
   become: true
-  notify: Restart the MCP stack
+  notify:
+    - Restart the MCP stack
+    - Restart SearXNG
   tags: [mcp_stack, configure]
 
 - name: Copy the pinned upstream versions

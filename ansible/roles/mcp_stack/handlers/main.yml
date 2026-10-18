@@ -10,3 +10,18 @@
   # A dry run reports this rather than running it; the directory it would run
   # in is only created for real.
   when: not ansible_check_mode
+
+# `up -d` leaves SearXNG running when only its settings changed: the compose
+# definition is the same, and the single-file bind mount keeps pointing at the
+# inode the copy just replaced. SearXNG also reads the file only at start.
+# Listed after the stack handler because handlers run in file order and a fresh
+# host has no container to restart until that one has run.
+- name: Restart SearXNG
+  ansible.builtin.command:
+    cmd: >-
+      docker compose --env-file versions.env --env-file .env
+      {{ mcp_compose_files }} restart searxng
+    chdir: "{{ mcp_deploy_dir }}"
+  become: true
+  changed_when: true
+  when: not ansible_check_mode
