@@ -72,7 +72,7 @@ Searches several engines through SearXNG and returns titles, URLs and snippets. 
 |---|---|---|---|
 | `query` | string | required | 1-512 chars |
 | `limit` | integer | 10 | 1-50 |
-| `language` | string | `"auto"` | max 16 chars; `"auto"` is not sent upstream |
+| `language` | string | `"auto"` | max 16 chars; `"auto"` is not sent upstream, so SearXNG's `search.default_lang` applies (`en` in `docker/searxng/settings.yml`) |
 | `categories` | string[] | `["general"]` | max 8 items, each max 32 chars; ignored when `engines` is given |
 | `engines` | string[] | omitted | 1-16 items, each 1-48 chars; names are not validated; replaces `categories` |
 | `timeRange` | `"day"`/`"week"`/`"month"`/`"year"` | omitted | |

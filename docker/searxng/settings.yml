@@ -22,6 +22,12 @@ search:
   formats:
     - html
     - json
+  # Upstream's "auto" resolves to the caller's Accept-Language, and the MCP
+  # sends none, so a search without `language` ran as "all" and the engines
+  # chose the locale from the JP egress: English queries came back led by
+  # Japanese pages (measured 2026-10-18 on google cse). No environment variable
+  # reaches this setting. A caller that wants another language still sets it.
+  default_lang: "en"
 
 # Which engines run. Nothing here defines an engine; each entry flips the
 # `disabled` flag on a definition that stays upstream's, so a new release still
@@ -62,11 +68,16 @@ search:
 #                   nothing, because the page no longer carries the `data: [{`
 #                   its parser looks for:
 #                   https://github.com/searxng/searxng/issues/6819
-#   bing            answers, but with the wrong market. With no language set
-#                   SearXNG sends neither `setlang` nor `cc`, and never sends
-#                   `cc=us` at all, so Bing picks the market from the JP egress
-#                   and English queries come back as Japanese dictionary pages.
-#                   It costs relevance rather than failing, which is worse.
+#   bing            answers, but with the wrong market. Bing takes the market
+#                   from `cc` alone - `setlang=en` without it still returned
+#                   Japanese dictionary pages for an English query - and
+#                   bing.py never sends `cc=us`, so for English the market
+#                   always follows the JP egress. default_lang above cannot
+#                   fix it. It costs relevance rather than failing, which is
+#                   worse.
+#   wikidata        contributes infoboxes only, which the MCP discards
+#                   (src/upstream/searxng.ts), yet hit its 3s timeout on two
+#                   of three queries, holding the whole search for those 3s.
 #
 # Re-enable google or brave when a release fixes the issue linked above, and
 # re-run the measurement first: these are observations and they go stale.
@@ -76,6 +87,8 @@ engines:
   - name: bing
     disabled: true
   - name: brave
+    disabled: true
+  - name: wikidata
     disabled: true
   - name: duckduckgo web
     disabled: false
