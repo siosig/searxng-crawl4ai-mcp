@@ -56,7 +56,7 @@ export const SearchInput = z
     limit: z.coerce.number().int().min(1).max(50).default(10)
       .describe("Maximum number of hits to return."),
     language: z.string().max(16).default("auto")
-      .describe('Language code such as "ja" or "en". "auto" leaves it to the engines.'),
+      .describe('Language code such as "ja" or "en". "auto" uses the instance\'s default language.'),
     categories: z.array(z.string().max(32)).max(8).default(["general"])
       .describe('SearXNG categories, e.g. ["general"], ["news"], ["it"].'),
     ...narrowing,
