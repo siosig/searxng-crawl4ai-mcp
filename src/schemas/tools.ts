@@ -29,7 +29,7 @@ export const FormatSchema = z
 const narrowing = {
   engines: z.array(z.string().min(1).max(48)).min(1).max(16).optional()
     .describe(
-      'Limit the search to these engines by name, e.g. ["google", "duckduckgo"]. ' +
+      'Limit the search to these engines by name, e.g. ["google cse", "duckduckgo web"]. ' +
         "Omit to use every engine the instance has enabled. " +
         "Takes precedence over `categories`: naming engines means only those, " +
         "not those in addition to a category.",
