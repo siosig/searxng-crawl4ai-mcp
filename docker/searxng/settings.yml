@@ -30,9 +30,11 @@ search:
 # The section exists because upstream's defaults do not survive contact with
 # this deployment. Upstream enables four general web engines - brave,
 # duckduckgo, google cse and startpage - and ships google and bing switched
-# off. Measured against this deployment's own egress on 2026-09-01, by asking
-# the running instance for one engine at a time
-# (`/search?format=json&engines=<name>`):
+# off. What remains is `google cse` and `duckduckgo web`. Measured against this
+# deployment's own egress with searxng 2026.10.7-6671d89be: `/stats/errors` on
+# the running instance, and each engine's request replayed from inside the
+# container with the same curl_cffi client (startpage and duckduckgo were last
+# measured on 2026-09-01, the rest on 2026-10-18):
 #
 #   startpage       answered every request with /sp/captcha-block?bc=JP. Same
 #                   answer for SearXNG's user agent and a current Chrome one,
@@ -48,22 +50,33 @@ search:
 #                   unconditionally, so no setting reaches it. `duckduckgo web`
 #                   is the same operator over a different endpoint and answers
 #                   normally, so that is the one that runs.
-#   brave           429s intermittently, after which SearXNG suspends it for
-#                   180s - but it returned a full page when asked on its own.
-#                   Left enabled: an engine that works some of the time is
-#                   worth more than the failure it reports the rest of it.
-#   google, bing    both returned results here. They were off only because
-#                   upstream ships them off.
+#   google          403 on every request (100% access denied). Google refuses
+#                   the /wml/search endpoint the engine relies on, whatever the
+#                   locale, user agent or TLS fingerprint - an upstream-wide
+#                   breakage, not this egress:
+#                   https://github.com/searxng/searxng/issues/6835
+#   brave           429 on every request. brave.py forces
+#                   `Accept-Encoding: gzip, deflate` on top of Chrome
+#                   impersonation and Brave flags the mismatch; the same request
+#                   without that header got 200. Even then the engine finds
+#                   nothing, because the page no longer carries the `data: [{`
+#                   its parser looks for:
+#                   https://github.com/searxng/searxng/issues/6819
+#   bing            answers, but with the wrong market. With no language set
+#                   SearXNG sends neither `setlang` nor `cc`, and never sends
+#                   `cc=us` at all, so Bing picks the market from the JP egress
+#                   and English queries come back as Japanese dictionary pages.
+#                   It costs relevance rather than failing, which is worse.
 #
-# Leaving this to the defaults left a metasearch running on `google cse` alone,
-# with three of its four engines failing on every query. These are measurements
-# and they can go stale: re-run the per-engine query above before trusting any
-# line of it.
+# Re-enable google or brave when a release fixes the issue linked above, and
+# re-run the measurement first: these are observations and they go stale.
 engines:
   - name: google
-    disabled: false
+    disabled: true
   - name: bing
-    disabled: false
+    disabled: true
+  - name: brave
+    disabled: true
   - name: duckduckgo web
     disabled: false
   - name: duckduckgo
