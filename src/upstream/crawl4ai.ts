@@ -95,7 +95,7 @@ const STREAM_CONFIG = { stream: true } as const;
  * middle of a sentence that is kept. On the Wikipedia page for Tokyo this
  * turned "(lit. 'Eastern Capital')" into "(lit. '')". A preserved tag is kept
  * whole and not scored, so spans now go wherever their block goes; the fit
- * markdown of that page grows by about 13%.
+ * markdown of that page grows by about 2%.
  */
 const PRUNING_FILTER = { type: "PruningContentFilter", params: { preserve_tags: ["span"] } } as const;
 
