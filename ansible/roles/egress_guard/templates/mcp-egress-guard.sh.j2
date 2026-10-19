@@ -16,16 +16,25 @@ nft -f /etc/mcp-egress-guard.nft
 # This half is iptables because the nft equivalent needs nft_ct, which some
 # kernels lack. Declaring the chain in a --noflush restore replaces its rules in
 # one transaction.
-iptables-restore -w --noflush <<EOF
-*filter
-:$CHAIN - [0:0]
+#
+# The jump must stay the first rule in INPUT: other services insert at the top
+# as well, and a rule ahead of it could accept the stack's traffic. Every run
+# deletes the existing jumps by their spec and inserts one at the top in the
+# same transaction, so the jump is never missing and no other rule is touched.
+JUMP="-s $SRC -j $CHAIN"
+copies=$(iptables -w -S INPUT | grep -c -x -F -- "-A INPUT $JUMP" || true)
+{
+    echo "*filter"
+    echo ":$CHAIN - [0:0]"
 {% for dest in egress_guard_allowed_destinations %}
--A $CHAIN -d {{ dest }} -j RETURN
+    echo "-A $CHAIN -d {{ dest }} -j RETURN"
 {% endfor %}
--A $CHAIN -m conntrack --ctstate NEW -j DROP
-COMMIT
-EOF
-
-if ! iptables -w -C INPUT -s "$SRC" -j "$CHAIN" 2>/dev/null; then
-    iptables -w -I INPUT 1 -s "$SRC" -j "$CHAIN"
-fi
+    echo "-A $CHAIN -m conntrack --ctstate NEW -j DROP"
+    i=0
+    while [ "$i" -lt "$copies" ]; do
+        echo "-D INPUT $JUMP"
+        i=$((i + 1))
+    done
+    echo "-I INPUT 1 $JUMP"
+    echo "COMMIT"
+} | iptables-restore -w --noflush

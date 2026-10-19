@@ -3,16 +3,17 @@
 # ordered after docker.service leaves them unfiltered for as long as dockerd
 # takes to settle. This unit runs before docker.service instead, and the
 # docker.service drop-in requires it: if the rules cannot be applied, Docker
-# does not start.
+# does not start. Nothing earlier is needed: the rules concern only the stack's
+# Docker bridge, which does not exist until dockerd creates it.
 #
 # Restarting or stopping this unit restarts or stops Docker through that
 # requirement. Reapply the rules with `systemctl reload`, which does not.
 [Unit]
 Description=MCP stack egress rules
-DefaultDependencies=no
-Wants=network-pre.target
-Before=network-pre.target docker.service shutdown.target
-Conflicts=shutdown.target
+{% if egress_guard_after_units | length > 0 %}
+After={{ egress_guard_after_units | join(' ') }}
+{% endif %}
+Before=docker.service
 
 [Service]
 Type=oneshot

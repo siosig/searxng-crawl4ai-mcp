@@ -23,5 +23,11 @@ egress_guard_allowed_destinations: []
 # own services.
 egress_guard_input_chain: "MCP-EGRESS-IN"
 
+# Units that also insert rules at the top of INPUT at boot. The egress unit is
+# ordered after them so its jump ends up first. Ordering only: a unit that is
+# missing or fails does not stop the rules. One that restarts later inserts
+# ahead again; `systemctl reload mcp-egress-guard` moves the jump back.
+egress_guard_after_units: []
+
 # Label on the nftables drop rule, shown by `nft list table inet mcp_egress`.
 egress_guard_comment: "mcp-stack: no reaching the local network"
