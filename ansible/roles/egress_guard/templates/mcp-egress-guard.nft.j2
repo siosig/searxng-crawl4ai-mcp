@@ -1,0 +1,23 @@
+#!/usr/sbin/nft -f
+# Managed by Ansible (egress_guard). Loaded by /usr/local/sbin/mcp-egress-guard.
+#
+# The table is Docker-independent: it exists before dockerd starts and Docker
+# never touches it. The empty declaration followed by the delete makes the load
+# replace the table in one transaction, so a reapply has no unfiltered moment.
+#
+# No conntrack ("ct") expressions: some kernels this runs on are built without
+# nft_ct, and the whole file would be rejected.
+table inet mcp_egress {}
+delete table inet mcp_egress
+
+table inet mcp_egress {
+	chain forward {
+		# Ahead of Docker's own forward rules (priority filter). An accept here
+		# only ends this chain; Docker's rules still decide what is forwarded.
+		type filter hook forward priority filter - 10; policy accept;
+{% if egress_guard_allowed_destinations | length > 0 %}
+		ip saddr {{ egress_guard_source_subnet }} ip daddr { {{ egress_guard_allowed_destinations | join(', ') }} } accept
+{% endif %}
+		ip saddr {{ egress_guard_source_subnet }} ip daddr { {{ egress_guard_blocked_destinations | join(', ') }} } counter drop comment "{{ egress_guard_comment }}"
+	}
+}

@@ -1,7 +1,7 @@
 ---
 description: "How searxng-crawl4ai-mcp is built and deployed, and why: design constraints and their guards, module layout, upstream client and retry policy, crawl and search sequencing, the login-session mechanism, the compose stack, Ansible roles, egress guard, crawl4ai memory and restarts, observability, CI and tests. Read before changing code structure, upstream calls, containers, deployment or tests."
 updated: 2026-10-19
-keywords: [architecture, design, upstream, retry, Crawl4AI, SearXNG, compose, Ansible, egress guard, iptables, watchdog, login-session, Alloy, CI, contract tests, versions.env]
+keywords: [architecture, design, upstream, retry, Crawl4AI, SearXNG, compose, Ansible, egress guard, iptables, nftables, watchdog, login-session, Alloy, CI, contract tests, versions.env]
 ---
 
 # searxng-crawl4ai-mcp design and deployment
@@ -54,7 +54,7 @@ flowchart LR
   S -->|Slots.run| U[upstream/*]
   U -->|GET /search| X[SearXNG]
   U -->|POST /crawl/stream, GET /llm| K[Crawl4AI]
-  K -->|stack subnet, filtered by DOCKER-USER| W[Internet]
+  K -->|stack subnet, filtered by mcp_egress| W[Internet]
   X --> W
 ```
 
@@ -142,7 +142,7 @@ The MCP image (`Dockerfile`) builds with pnpm in one stage and runs `node dist/i
 
 ## Ansible deployment
 
-`ansible/site.yml` runs on `mcp_hosts`, asserts the three vault secrets are at least 16 characters, then applies the roles `mcp_stack`, `egress_guard`, `nginx_proxy` and `observability` in that order. The playbook pulls images and never builds. The Gemini key is read from the repository-root `.env`; other secrets come from the vault.
+`ansible/site.yml` runs on `mcp_hosts`, asserts the three vault secrets are at least 16 characters, then applies the roles `egress_guard`, `mcp_stack`, `nginx_proxy` and `observability` in that order; `egress_guard` comes first so a new host never runs the stack unfiltered. The playbook pulls images and never builds. The Gemini key is read from the repository-root `.env`; other secrets come from the vault.
 
 Role `mcp_stack`:
 
@@ -157,7 +157,16 @@ Role `nginx_proxy` drops a `location = /mcp-searxng-crawl4ai` snippet into an ex
 
 ## Egress guard
 
-The outbound security boundary is the role `egress_guard`, not the application check described in `docs/spec.md`, "Outbound request policy": a oneshot systemd unit `mcp-egress-guard` (bound to `docker.service`) that adds `iptables` rules to the `DOCKER-USER` chain dropping traffic from `STACK_SUBNET` to `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, `127.0.0.0/8` and `100.64.0.0/10`. Allowed exceptions are inserted first as `RETURN`. Rules are added only if absent, so reruns are idempotent. The source subnet is read from `versions.env` at deploy time.
+The outbound security boundary is the role `egress_guard`, not the application check described in `docs/spec.md`, "Outbound request policy". It installs a oneshot systemd unit `mcp-egress-guard` that runs `/usr/local/sbin/mcp-egress-guard` and applies two sets of rules for traffic from `STACK_SUBNET`:
+
+| Path | Mechanism | Rule |
+|---|---|---|
+| Routed to another machine | nftables table `inet mcp_egress`, loaded from `/etc/mcp-egress-guard.nft`; base chain on the `forward` hook at priority `filter - 10`, ahead of Docker's rules | drop to `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, `127.0.0.0/8` and `100.64.0.0/10`; allowed exceptions are accepted first |
+| Delivered to the host itself, on any of its addresses | iptables chain `MCP-EGRESS-IN`, jumped to from the top of `INPUT` | drop new connections (`-m conntrack --ctstate NEW`); allowed exceptions return first; replies to connections the host opens into the stack pass |
+
+The unit runs before `docker.service` (`DefaultDependencies=no`, `Before=network-pre.target docker.service`) because dockerd starts containers before it reports ready, so a unit ordered after Docker leaves them unfiltered while dockerd settles. The drop-in `/etc/systemd/system/docker.service.d/mcp-egress-guard.conf` adds `Requires=` and `After=` on the unit: if the rules cannot be applied, Docker does not start. Through that requirement, restarting or stopping `mcp-egress-guard` restarts or stops Docker, so rules are reapplied with `systemctl reload mcp-egress-guard`, which the role's handler uses.
+
+Neither rule set depends on Docker, and Docker does not rewrite them. The nftables file replaces the whole table in one transaction and the chain is replaced by one `iptables-restore --noflush`, so reapplying is idempotent and leaves no unfiltered moment. The `INPUT` half uses iptables because the nftables `ct` expression needs the kernel's `nft_ct`, which some target kernels are built without; the nftables half contains no `ct` expression for the same reason. Container DNS is unaffected: Docker's embedded resolver forwards queries from the host's network namespace. The stack network has IPv6 disabled, so only IPv4 is filtered. Earlier versions put the rules in `DOCKER-USER`; the role removes those after the new rules are active. The source subnet is read from `versions.env` at deploy time.
 
 ## Crawl4AI memory and restarts
 

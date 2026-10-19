@@ -1,37 +1,31 @@
 #!/bin/sh
-# Managed by Ansible (egress_guard). Installs the stack's egress rules in
-# DOCKER-USER. Safe to run repeatedly: a rule that is already present is kept.
+# Managed by Ansible (egress_guard). Applies the stack's egress rules. Runs
+# before docker.service, so it relies on nothing Docker creates, and it is safe
+# to run repeatedly: each part replaces its own rules rather than adding to them.
 set -eu
 
 SRC="{{ egress_guard_source_subnet }}"
-COMMENT="{{ egress_guard_comment }}"
+CHAIN="{{ egress_guard_input_chain }}"
 
-# xt_comment is missing on some kernels; a rule must not depend on its label.
-probe="MCP_COMMENT_PROBE"
-iptables -w -N "$probe" 2>/dev/null || true
-if iptables -w -A "$probe" -j RETURN -m comment --comment probe 2>/dev/null; then
-    label=1
-else
-    label=0
-fi
-iptables -w -F "$probe" 2>/dev/null || true
-iptables -w -X "$probe" 2>/dev/null || true
+# Routed traffic: the container reaching another machine.
+nft -f /etc/mcp-egress-guard.nft
 
-ensure() {
-    action="$1"; dest="$2"; target="$3"; suffix="$4"
-    if [ "$label" = 1 ]; then
-        set -- -m comment --comment "$COMMENT$suffix"
-    else
-        set --
-    fi
-    if ! iptables -w -C DOCKER-USER -s "$SRC" -d "$dest" -j "$target" "$@" 2>/dev/null; then
-        iptables -w "$action" DOCKER-USER -s "$SRC" -d "$dest" -j "$target" "$@"
-    fi
-}
-
+# Local delivery: the container reaching the host itself, on any of its
+# addresses. That never passes the forward hook. Only new connections are
+# dropped, so replies to connections the host opens into the stack still flow.
+# This half is iptables because the nft equivalent needs nft_ct, which some
+# kernels lack. Declaring the chain in a --noflush restore replaces its rules in
+# one transaction.
+iptables-restore -w --noflush <<EOF
+*filter
+:$CHAIN - [0:0]
 {% for dest in egress_guard_allowed_destinations %}
-ensure -I "{{ dest }}" RETURN " (allowed)"
+-A $CHAIN -d {{ dest }} -j RETURN
 {% endfor %}
-{% for dest in egress_guard_blocked_destinations %}
-ensure -A "{{ dest }}" DROP ""
-{% endfor %}
+-A $CHAIN -m conntrack --ctstate NEW -j DROP
+COMMIT
+EOF
+
+if ! iptables -w -C INPUT -s "$SRC" -j "$CHAIN" 2>/dev/null; then
+    iptables -w -I INPUT 1 -s "$SRC" -j "$CHAIN"
+fi

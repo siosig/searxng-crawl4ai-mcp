@@ -1,0 +1,6 @@
+# Managed by Ansible (egress_guard).
+# Docker starts only after the stack's egress rules are in place, and does not
+# start at all if they could not be applied.
+[Unit]
+Requires=mcp-egress-guard.service
+After=mcp-egress-guard.service

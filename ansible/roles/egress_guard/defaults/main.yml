@@ -15,10 +15,13 @@ egress_guard_blocked_destinations:
   - "127.0.0.0/8"
   - "100.64.0.0/10"
 
-# Exceptions, if the operator deliberately allows a device on the LAN.
+# Exceptions, if the operator deliberately allows a device on the LAN. An entry
+# that is one of the host's own addresses also opens that address to the stack.
 egress_guard_allowed_destinations: []
 
-# Rules are labelled with an iptables comment where the kernel supports it.
-# Some kernels ship without xt_comment, and a security control must not depend
-# on an optional module, so support is detected and the label simply omitted.
+# The iptables chain, jumped to from INPUT, that keeps the stack off the host's
+# own services.
+egress_guard_input_chain: "MCP-EGRESS-IN"
+
+# Label on the nftables drop rule, shown by `nft list table inet mcp_egress`.
 egress_guard_comment: "mcp-stack: no reaching the local network"

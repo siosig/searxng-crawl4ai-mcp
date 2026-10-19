@@ -1,8 +1,17 @@
 ---
+# Listed first so a changed drop-in is loaded before the egress unit reloads.
+- name: Reload systemd units
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  when: not ansible_check_mode
+
+# A reload, never a restart: docker.service requires this unit, so restarting
+# it would restart Docker as well. A reload starts the unit if it is inactive.
 - name: Reapply the egress rules
   ansible.builtin.systemd:
     name: mcp-egress-guard.service
-    state: restarted
+    state: reloaded
     daemon_reload: true
   become: true
   when: not ansible_check_mode

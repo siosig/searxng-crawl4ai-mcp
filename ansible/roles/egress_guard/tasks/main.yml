@@ -1,17 +1,19 @@
 ---
-# Blocks the scraping containers from reaching the local network.
+# Blocks the scraping containers from reaching the local network and the host.
 #
 # This is the layer that actually holds. The check inside the MCP server
 # resolves a hostname and refuses private addresses, which gives the caller a
 # precise error - but a name can resolve differently a moment later, and no
 # application-level check closes that window. A packet filter does.
 #
-# Rules go in DOCKER-USER because Docker consults it before its own rules and
-# does not flush it on restart.
+# The rules are applied by a unit that runs before docker.service, because
+# dockerd starts containers before it reports ready. They live in Docker's
+# blind spots - an nftables table of their own and an iptables chain jumped to
+# from INPUT - so Docker neither needs to exist first nor rewrites them.
 
-- name: Ensure iptables is present
+- name: Ensure iptables and nftables are present
   ansible.builtin.package:
-    name: iptables
+    name: [iptables, nftables]
     state: present
   become: true
   tags: [egress_guard, security]
@@ -25,51 +27,16 @@
          | default(egress_guard_source_subnet, true) }}
   tags: [egress_guard, security]
 
-- name: Confirm the DOCKER-USER chain exists
-  ansible.builtin.command:
-    cmd: iptables -t filter -L DOCKER-USER -n
+- name: Install the nftables ruleset for routed traffic
+  ansible.builtin.template:
+    src: mcp-egress-guard.nft.j2
+    dest: /etc/mcp-egress-guard.nft
+    owner: root
+    group: root
+    mode: "0644"
+    validate: nft -c -f %s
   become: true
-  register: docker_user_chain
-  changed_when: false
-  failed_when: false
-  tags: [egress_guard, security]
-
-- name: Fail when Docker has not created its hook chain
-  ansible.builtin.assert:
-    that: docker_user_chain.rc == 0
-    fail_msg: >-
-      The DOCKER-USER chain does not exist, so there is nowhere to install the
-      egress rules. Docker creates it when it manages iptables; check that
-      iptables handling is not disabled in /etc/docker/daemon.json.
-  tags: [egress_guard, security]
-
-# xt_comment is not present on every kernel - it is missing on some minimal
-# server builds - and iptables reports its absence as a confusing
-# "No such file or directory" against the chain. Detect it once rather than
-# letting a label decide whether the firewall gets configured at all.
-- name: Check whether iptables can label rules
-  ansible.builtin.shell:
-    cmd: |
-      set -e
-      iptables -t filter -N MCP_COMMENT_PROBE 2>/dev/null || true
-      rc=0
-      iptables -t filter -A MCP_COMMENT_PROBE -j RETURN -m comment --comment probe 2>/dev/null || rc=$?
-      iptables -t filter -F MCP_COMMENT_PROBE 2>/dev/null || true
-      iptables -t filter -X MCP_COMMENT_PROBE 2>/dev/null || true
-      exit $rc
-  become: true
-  register: comment_supported
-  changed_when: false
-  failed_when: false
-  tags: [egress_guard, security]
-
-- name: Note that rules will be unlabelled on this kernel
-  ansible.builtin.debug:
-    msg: >-
-      This kernel has no xt_comment module, so the egress rules are installed
-      without a comment. They are still enforced; they are simply harder to
-      recognise in `iptables -S DOCKER-USER`.
-  when: comment_supported.rc != 0
+  notify: Reapply the egress rules
   tags: [egress_guard, security]
 
 - name: Install the script that applies the egress rules
@@ -83,7 +50,7 @@
   notify: Reapply the egress rules
   tags: [egress_guard, security]
 
-- name: Install the unit that applies them after Docker starts
+- name: Install the unit that applies them before Docker starts
   ansible.builtin.template:
     src: mcp-egress-guard.service.j2
     dest: /etc/systemd/system/mcp-egress-guard.service
@@ -92,6 +59,30 @@
     mode: "0644"
   become: true
   notify: Reapply the egress rules
+  tags: [egress_guard, security]
+
+- name: Ensure the docker.service drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  tags: [egress_guard, security]
+
+# Fail closed: with the rules missing, Docker stays down rather than running
+# the stack unfiltered. Takes effect the next time Docker starts; Docker is not
+# restarted here.
+- name: Make Docker require the egress rules
+  ansible.builtin.template:
+    src: docker-mcp-egress-guard.conf.j2
+    dest: /etc/systemd/system/docker.service.d/mcp-egress-guard.conf
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload systemd units
   tags: [egress_guard, security]
 
 - name: Enable the unit so the rules return after a reboot
@@ -115,4 +106,36 @@
     state: started
   become: true
   when: not ansible_check_mode
+  tags: [egress_guard, security]
+
+# Earlier versions put the rules in DOCKER-USER, labelled with a comment only
+# where the kernel has xt_comment, so both forms are removed. Removed only now,
+# with the replacement already active. An absent rule or chain is a no-op, so
+# these two tasks can go once no host still has the old rules.
+- name: Remove the DOCKER-USER drop rules earlier versions installed
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    source: "{{ egress_guard_source_subnet }}"
+    destination: "{{ item.0 }}"
+    jump: DROP
+    comment: "{{ item.1 | ternary(egress_guard_comment, omit) }}"
+    state: absent
+    wait: "5"
+  loop: >-
+    {{ egress_guard_blocked_destinations | product([false, true]) | list }}
+  become: true
+  tags: [egress_guard, security]
+
+- name: Remove the DOCKER-USER exceptions earlier versions installed
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    source: "{{ egress_guard_source_subnet }}"
+    destination: "{{ item.0 }}"
+    jump: RETURN
+    comment: "{{ item.1 | ternary(egress_guard_comment ~ ' (allowed)', omit) }}"
+    state: absent
+    wait: "5"
+  loop: >-
+    {{ egress_guard_allowed_destinations | product([false, true]) | list }}
+  become: true
   tags: [egress_guard, security]

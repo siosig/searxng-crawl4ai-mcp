@@ -17,8 +17,9 @@
       tags: [always]
 
   roles:
-    - role: mcp_stack
+    # Before the stack, so its containers never start unfiltered on a new host.
     - role: egress_guard
+    - role: mcp_stack
     - role: nginx_proxy
     # Last, and unable to take the rest down with it. Metrics are an optional
     # extra: a host with no monitoring stack skips this entirely and still

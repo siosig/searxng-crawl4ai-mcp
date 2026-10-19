@@ -1,17 +1,24 @@
 # Managed by Ansible (egress_guard).
-# DOCKER-USER is recreated empty at every boot, and the host's saved ruleset
-# cannot be relied on to restore it: it also holds rules that reference ipsets
-# other services create later, so the whole file is rejected at boot.
+# dockerd starts the stack's containers before it reports ready, so a unit
+# ordered after docker.service leaves them unfiltered for as long as dockerd
+# takes to settle. This unit runs before docker.service instead, and the
+# docker.service drop-in requires it: if the rules cannot be applied, Docker
+# does not start.
+#
+# Restarting or stopping this unit restarts or stops Docker through that
+# requirement. Reapply the rules with `systemctl reload`, which does not.
 [Unit]
-Description=MCP stack egress rules (DOCKER-USER)
-After=docker.service network-online.target
-Requires=docker.service
-PartOf=docker.service
+Description=MCP stack egress rules
+DefaultDependencies=no
+Wants=network-pre.target
+Before=network-pre.target docker.service shutdown.target
+Conflicts=shutdown.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/local/sbin/mcp-egress-guard
+ExecReload=/usr/local/sbin/mcp-egress-guard
 
 [Install]
 WantedBy=multi-user.target
