@@ -4,7 +4,6 @@ import { crawl } from "../upstream/crawl4ai.js";
 import {
   ANNOTATIONS,
   countDocuments,
-  documentsMarkdown,
   egressGuard,
   fetchSlots,
   guarded,
@@ -12,6 +11,7 @@ import {
   replyFailure,
 } from "./shared.js";
 import type { FetchedDocument } from "../upstream/types.js";
+import type { TrimStep } from "../utils/fit.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -28,6 +28,12 @@ import { logger } from "../utils/logger.js";
  */
 
 const BATCH = 5;
+
+/**
+ * What to cut, in order, when the result is over the size limit: pages go
+ * from the end of the list, so the pages nearest the starting URL survive.
+ */
+export const CRAWL_STEPS: readonly TrimStep[] = [{ kind: "documents", path: "/documents" }];
 
 function sameHost(candidate: string, origin: URL): boolean {
   try {
@@ -63,16 +69,17 @@ export function registerCrawlTool(server: McpServer): void {
       annotations: ANNOTATIONS,
     },
     async (params) =>
-      guarded("web_crawl", params.format, async () => {
+      guarded("web_crawl", async () => {
         const denied = await egressGuard(params.url);
-        if (denied) return replyFailure(denied, params.format);
+        if (denied) return replyFailure(denied);
 
         const start = canonical(params.url);
         if (start === null) {
-          return replyFailure(
-            { kind: "invalidInput", message: `Not a crawlable URL: ${params.url}`, upstreamStatus: null },
-            params.format,
-          );
+          return replyFailure({
+            kind: "invalidInput",
+            message: `Not a crawlable URL: ${params.url}`,
+            upstreamStatus: null,
+          });
         }
         const origin = new URL(start);
 
@@ -128,15 +135,7 @@ export function registerCrawlTool(server: McpServer): void {
           "crawl finished",
         );
 
-        const note =
-          stoppedAt === "pages"
-            ? `Stopped at the ${params.maxPages}-page limit; more pages remain.`
-            : stoppedAt === "depth"
-              ? `Stopped at depth ${params.maxDepth}; deeper pages were not followed.`
-              : "Followed every reachable link within the limits.";
-
         return reply(
-          `Crawled ${documents.length} pages from ${start}. ${note}\n\n${documentsMarkdown(documents)}`,
           {
             start,
             state: "completed",
@@ -145,7 +144,7 @@ export function registerCrawlTool(server: McpServer): void {
             stoppedAt,
             documents,
           },
-          params.format,
+          CRAWL_STEPS,
         );
       }),
   );

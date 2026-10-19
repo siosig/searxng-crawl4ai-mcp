@@ -61,7 +61,7 @@ test("a refusal is distinguishable from an unreachable host", async () => {
 
 test("a refusal reaches the client announced as a failure, not just described as one", async () => {
   // The reason and the announcement are two different things. The body has
-  // said "Failed (egressDenied)" since this server was written, but without
+  // named the failure kind since this server was written, but without
   // `isError` the protocol reads the whole call as successful - "if not set,
   // the call is assumed to be successful" - so a client had no way to surface
   // it as a failure. This asserts the flag survives the wire.

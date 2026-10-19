@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
@@ -294,4 +294,25 @@ test("the crawl4ai session image is declared in versions.env", () => {
   // The image that runs crawl4ai with the shared profile is built here, not
   // pulled from upstream, but it follows the same rule: one place names it.
   assert.match(read(join(ROOT, "versions.env")), /^CRAWL4AI_SESSION_IMAGE=/m);
+});
+
+// The body of a result has one shape now, so there is nothing to render. If a
+// markdown renderer or a `format` argument comes back, the text content and
+// structuredContent can disagree again - which is the bug this removed.
+test("results are JSON only: no markdown renderer and no format argument come back", () => {
+  assert.equal(existsSync(join(ROOT, "src/utils/format.ts")), false);
+
+  const banned =
+    /\bFormatSchema\b|\btoMarkdown\b|documentsMarkdown|documentMarkdown|params\.format|utils\/format\.js/;
+  const offenders = walk(join(ROOT, "src"), (p) => p.endsWith(".ts")).filter((p) =>
+    read(p).split("\n").some((line) => banned.test(line)),
+  );
+  assert.deepEqual(
+    offenders.map((p) => p.replace(ROOT, "")),
+    [],
+    "no file under src/ may name the markdown renderer or the format argument",
+  );
+
+  assert.doesNotMatch(read(join(ROOT, "src/schemas/tools.ts")), /\bformat\s*:/);
+  assert.match(read(join(ROOT, "src/tools/shared.ts")), /\bfit\(/);
 });

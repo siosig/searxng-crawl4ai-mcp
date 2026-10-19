@@ -5,7 +5,6 @@ import { crawl } from "../upstream/crawl4ai.js";
 import {
   ANNOTATIONS,
   countDocuments,
-  documentsMarkdown,
   fetchSlots,
   guarded,
   partitionByEgress,
@@ -13,6 +12,16 @@ import {
 } from "./shared.js";
 import { recordSearch } from "../metrics/record.js";
 import type { FetchedDocument } from "../upstream/types.js";
+import type { TrimStep } from "../utils/fit.js";
+
+/**
+ * What to cut, in order, when the result is over the size limit: fetched pages
+ * first, since they are the bulk, then the search hits that point at them.
+ */
+export const SEARCH_AND_SCRAPE_STEPS: readonly TrimStep[] = [
+  { kind: "documents", path: "/documents" },
+  { kind: "items", path: "/search/results" },
+];
 
 /**
  * Search and then read the top hits.
@@ -35,7 +44,7 @@ export function registerSearchAndScrapeTool(server: McpServer): void {
       annotations: ANNOTATIONS,
     },
     async (params) =>
-      guarded("web_search_and_scrape", params.format, async () => {
+      guarded("web_search_and_scrape", async () => {
         const result = await search({
           query: params.query,
           limit: params.topN,
@@ -76,22 +85,7 @@ export function registerSearchAndScrapeTool(server: McpServer): void {
         recordSearch(result.results.length, result.unresponsiveEngines);
         countDocuments(documents);
 
-        const engineNote = result.unresponsiveEngines.length
-          ? `\n\n_Engines that did not answer: ${result.unresponsiveEngines
-              .map((e) => `${e.engine} (${e.reason})`)
-              .join(", ")}._`
-          : "";
-
-        const headline =
-          documents.length === 0
-            ? `No results for "${params.query}", so nothing was fetched.`
-            : `Read ${documents.filter((d) => d.status === "ok").length} of ${documents.length} top results for "${params.query}".`;
-
-        return reply(
-          `${headline}${engineNote}\n\n${documentsMarkdown(documents)}`,
-          { search: result, documents },
-          params.format,
-        );
+        return reply({ search: result, documents }, SEARCH_AND_SCRAPE_STEPS);
       }),
   );
 }

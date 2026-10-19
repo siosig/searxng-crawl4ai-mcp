@@ -36,16 +36,56 @@ The listener binds all interfaces on `PORT`. The deployment publishes it on host
 ## Common tool contract
 
 - Every tool is registered with `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: true`. No tool declares an `outputSchema`.
-- Every input schema is strict: an unknown argument is rejected. A value that violates the schema is answered by the SDK as a JSON-RPC error before the tool runs; a well-formed value the server cannot act on is answered as the failure kind `invalidInput`.
-- Every tool accepts `format`: `"markdown"` (default, prose for a reader) or `"json"` (the text content is the structured result serialised as JSON).
-- A successful result carries `content: [{type: "text", text}]` and `structuredContent`, which is always the structured object regardless of `format`, plus a boolean `truncated`.
-- A whole-call failure carries `isError: true`, text `**Failed (<kind>)**: <message>`, and `structuredContent = {status: "failed", failure: {kind, message, upstreamStatus}, truncated}`.
+- Every input schema is strict: an unknown argument is rejected. A value that violates the schema never reaches the tool: the MCP SDK answers it with a result carrying `isError: true` and the plain text `Input validation error: Invalid arguments for tool <name>: <reason>`, without `structuredContent`. That reply is the SDK's and is the one result that is not JSON. A well-formed value the server cannot act on is answered by the tool as the failure kind `invalidInput`. No tool accepts `format`, so a call that passes it is rejected as a schema violation.
+- Every result the tools produce, successful or not, carries `content: [{type: "text", text}]` and `structuredContent`. `text` is `JSON.stringify(structuredContent)` with no indentation; the two always agree. There is no markdown rendering of a result.
+- `structuredContent` is the tool's structured result followed by two fields: `truncated` (boolean) and `truncation` (an object, or `null` when nothing was cut). See "Response size cap and truncation".
+- A whole-call failure carries `isError: true` and `structuredContent = {status: "failed", failure: {kind, message, upstreamStatus}, truncated, truncation}`.
 - Per-URL failures inside `web_batch_scrape`, `web_crawl` and `web_search_and_scrape` are not whole-call failures: each document carries its own `status` and `failure`, and the call succeeds.
-- A fetched document (`FetchedDocument` in `src/upstream/types.ts`) has `url`, `finalUrl` (after redirects, or `null`), `status` (`"ok"` or `"failed"`), `markdown`, `title`, `links` and `failure`.
+- A fetched document (`FetchedDocument` in `src/upstream/types.ts`) has `url`, `finalUrl` (after redirects, or `null`), `status` (`"ok"` or `"failed"`), `markdown`, `title`, `links` and `failure`. `markdown` is the page's readable content as a string value.
 
 ## Response size cap and truncation
 
-`CHARACTER_LIMIT` (`src/constants.ts`) is 25,000 characters and applies to the text content only. A longer text is cut so that the text including the notice is exactly 25,000 characters, and ends with `[truncated: the response exceeded the size limit. ... Narrow the request - fewer URLs, a lower page limit, or a more specific query.]`. `web_search` adds how many results were gathered. `structuredContent` is not cut, and `structuredContent.truncated` reports whether the text was. With `format: "json"`, a cut text is not valid JSON.
+`CHARACTER_LIMIT` (`src/constants.ts`) is 25,000 characters, counted as the `.length` (UTF-16 code units) of `text`. It is enforced on the serialised JSON, escapes included, so `text` is never longer than the cap and is always valid JSON. `structuredContent` holds exactly what `text` holds: nothing removed from one is kept in the other.
+
+A result that would be longer is reduced inside its structure, never by cutting the serialised string (`fit` in `src/utils/fit.ts`). Each tool lists the reductions it allows, and they are applied in order, each only while the result is still over the cap:
+
+| Tool | Reductions, in order |
+|---|---|
+| `web_search` | drop trailing `results`, then `answers`, then `suggestions`, then `unresponsiveEngines` |
+| `web_scrape` | shorten `markdown` from its end |
+| `web_extract` | with `GEMINI_API_KEY`: drop trailing elements of `data` when it is an array, then set `data` to `null`; without it: shorten `markdown` from its end |
+| `web_map` | drop trailing `external`, then trailing `internal` |
+| `web_batch_scrape`, `web_crawl` | reduce `documents` (below) |
+| `web_search_and_scrape` | reduce `documents` (below), then drop trailing `search.results` |
+
+Reducing `documents` keeps every document while it can:
+
+1. Every document's `links` becomes `{internal: [], external: []}` (a `null` stays `null`).
+2. The space left for page bodies is shared max-min fairly: a body shorter than an equal share is kept whole, and the rest are cut from their end to the same length. So a short page is never cut to make room for a long one.
+3. Only when the documents do not fit even with every body empty are documents dropped from the end of the array; the documents that remain then share the space as in step 2.
+
+If the listed reductions are not enough (an unusually long title, for example), every string value in the result is shortened max-min fairly as a last step.
+
+When anything was cut, `truncated` is `true` and `truncation` is:
+
+```json
+{
+  "limit": 25000,
+  "originalLength": 61234,
+  "cuts": [
+    {"path": "/documents/*/links/internal", "unit": "items", "original": 812, "kept": 0},
+    {"path": "/documents/3/markdown", "unit": "chars", "original": 30512, "kept": 4980}
+  ],
+  "advice": "The response exceeded the size limit and was reduced; cuts lists what was removed. Narrow the request - fewer URLs, a lower page limit, or a more specific query."
+}
+```
+
+- `limit` is the cap; `originalLength` is the length `text` would have had without any cut.
+- Each cut names a JSON Pointer (RFC 6901) `path`; a `*` segment stands for every element of the array, and `""` for the whole result. `unit` is `"chars"` (a string shortened or set to `null`, counted in UTF-16 code units, or another value set to `null`, counted as its serialised length) or `"items"` (array elements dropped from the end). `original` and `kept` are in that unit.
+- Cuts are listed in the order they were made. Only documents whose body was actually shortened get a cut.
+- Counters that describe the work done (`pagesFetched` in `web_crawl`, `okCount` and `failedCount` in `web_batch_scrape`) are not changed by a cut, so `documents` may hold fewer entries than they count; the `/documents` cut gives the original number.
+
+`truncated` and `truncation` are about the size cap only; tool-level flags such as `web_map`'s `limitReached` and `web_search`'s `coverage` are separate.
 
 ## Failure kinds
 
@@ -77,7 +117,6 @@ Searches several engines through SearXNG and returns titles, URLs and snippets. 
 | `engines` | string[] | omitted | 1-16 items, each 1-48 chars; names are not validated; replaces `categories` |
 | `timeRange` | `"day"`/`"week"`/`"month"`/`"year"` | omitted | |
 | `safesearch` | integer | omitted (instance setting) | 0 off, 1 moderate, 2 strict |
-| `format` | `"markdown"`/`"json"` | `"markdown"` | |
 
 Output (`SearchResult` in `src/upstream/types.ts`): `query`, `results[]` (`title`, `url`, `snippet`, `engines[]`, `score` or `null`), `answers[]`, `suggestions[]`, `unresponsiveEngines[]` (`engine`, `reason`; one entry per engine across pages), and `coverage`.
 
@@ -99,7 +138,6 @@ Fetches one page and returns its readable content as markdown, rendering JavaScr
 | Parameter | Type | Default | Constraint |
 |---|---|---|---|
 | `url` | URL | required | |
-| `format` | `"markdown"`/`"json"` | `"markdown"` | |
 
 Output is one `FetchedDocument` with `status: "ok"`, readable markdown (boilerplate removed) and `links: null`. A failed fetch is a whole-call failure.
 
@@ -113,7 +151,6 @@ Searches, then fetches the top hits in one call.
 | `topN` | integer | 3 | 1-10; also the search `limit` |
 | `language` | string | `"auto"` | max 16 chars |
 | `engines`, `timeRange`, `safesearch` | as in "Tool web_search" | omitted | |
-| `format` | `"markdown"`/`"json"` | `"markdown"` | |
 
 There is no `categories` and no `limit`. Output: `{search: SearchResult, documents: FetchedDocument[]}`, documents in hit order. A hit refused by the outbound policy, or without a result, is a failed document; the call still succeeds. Zero hits returns `documents: []`. Documents carry raw markdown with links.
 
@@ -124,7 +161,6 @@ Fetches a list of pages; each URL succeeds or fails on its own.
 | Parameter | Type | Default | Constraint |
 |---|---|---|---|
 | `urls` | URL[] | required | 1-20 items |
-| `format` | `"markdown"`/`"json"` | `"markdown"` | |
 
 Output: `{documents, okCount, failedCount}`, documents in input order. A batch in which every URL failed is still not a whole-call failure. The whole batch uses one fetch slot. Documents carry raw markdown with links.
 
@@ -138,7 +174,6 @@ Starts at a URL and follows links level by level, synchronously.
 | `maxDepth` | integer | 2 | 1-5 link hops |
 | `maxPages` | integer | 20 | 1-100 pages |
 | `sameHostOnly` | boolean | `true` | compares `URL.host` |
-| `format` | `"markdown"`/`"json"` | `"markdown"` | |
 
 Output: `{start, state: "completed", pagesFetched, depthReached, stoppedAt, documents}`. `start` is the start URL without its fragment. `pagesFetched` counts failed pages too. Reaching a cap ends the crawl normally. `stoppedAt`:
 
@@ -159,9 +194,8 @@ Fetches a page and lists the URLs it links to, without the page body.
 | `url` | URL | required | |
 | `limit` | integer | 100 | 1-500 |
 | `includeExternal` | boolean | `false` | |
-| `format` | `"markdown"`/`"json"` | `"markdown"` | |
 
-Output: `{url, internal[], external[], limitReached}`, each list de-duplicated in page order. Internal links come first up to `limit`; external links fill what remains of `limit`, only when `includeExternal` is true. `limitReached` is `true` when the page has more links than were returned because of `limit`, and the markdown text then ends with a note to raise `limit`; it is separate from `truncated`, the size-cap flag. A failed fetch is a whole-call failure.
+Output: `{url, internal[], external[], limitReached}`, each list de-duplicated in page order. Internal links come first up to `limit`; external links fill what remains of `limit`, only when `includeExternal` is true. `limitReached` is `true` when the page has more links than were returned because of `limit`; it is separate from `truncated`, the size-cap flag. A failed fetch is a whole-call failure.
 
 ## Tool web_extract
 
@@ -171,9 +205,8 @@ Pulls fields described in plain language out of a page, using the LLM configured
 |---|---|---|---|
 | `url` | URL | required | |
 | `instruction` | string | required | 1-2000 chars |
-| `format` | `"markdown"`/`"json"` | `"markdown"` | |
 
-With `GEMINI_API_KEY` set, the output is `{url, data, degraded: false, markdown: null, failure: null}`, where `data` is the upstream JSON as returned (shape not fixed). The extraction request has a 180-second timeout. Without `GEMINI_API_KEY`, the tool does not fail: it returns `{url, data: null, degraded: true, markdown, failure: null}` with the page's readable markdown, prefixed by a note that no language-model credentials are configured, and `instruction` is unused. `web_extract` does not detect an expired login, because the upstream does not return the final URL.
+With `GEMINI_API_KEY` set, the output is `{url, data, degraded: false, markdown: null, failure: null}`, where `data` is the upstream JSON as returned (shape not fixed). The extraction request has a 180-second timeout. Without `GEMINI_API_KEY`, the tool does not fail: it returns `{url, data: null, degraded: true, markdown, failure: null}` with the page's readable markdown, and `instruction` is unused. `web_extract` does not detect an expired login, because the upstream does not return the final URL.
 
 ## Outbound request policy
 
@@ -268,7 +301,7 @@ None are recorded as of 2026-10-16. A gap is an inconsistency inside the code; t
 ## References
 
 - `src/server.ts`, `src/tools/`, `src/schemas/tools.ts`: tool registration, behaviour and input schemas.
-- `src/utils/errors.ts`, `src/utils/format.ts`, `src/constants.ts`: failure kinds, truncation and limits.
+- `src/utils/errors.ts`, `src/utils/fit.ts`, `src/constants.ts`: failure kinds, truncation and limits.
 - `src/transport/http.ts`, `src/transport/stdio.ts`, `src/security/`: transports, authentication and outbound policy.
 - `src/upstream/`: upstream clients, search paging, login detection and gating.
 - `src/utils/env.ts`, `.env.example`: configuration.

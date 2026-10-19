@@ -38,7 +38,7 @@ interface Coverage {
 const REASONS = ["exhausted", "page_limit", "time_budget", "upstream_failed"];
 
 async function coverageOf(args: Record<string, unknown>): Promise<Coverage> {
-  const { structured } = await client.call("web_search", { format: "json", ...args });
+  const { structured } = await client.call("web_search", args);
   const coverage = structured.coverage as Coverage | undefined;
   assert.ok(coverage, `web_search returned no coverage: ${JSON.stringify(structured)}`);
   return coverage;

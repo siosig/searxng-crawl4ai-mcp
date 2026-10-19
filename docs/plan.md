@@ -37,7 +37,7 @@ The server keeps no state: no cache, no database, no background jobs.
 | `src/transport/` | `http.ts` (listener, Host/Origin check, bearer auth) and `stdio.ts` |
 | `src/security/` | `auth.ts` (bearer compare), `egress.ts` (`checkEgress`), `ranges.ts` (`DENIED_CIDRS`) |
 | `src/upstream/` | `http.ts` (`request`, the only HTTP client), `retry.ts`, `searxng.ts`, `crawl4ai.ts`, `login-detect.ts`, `login-session.ts`, `types.ts` (normalised types; upstream shapes do not leak out) |
-| `src/utils/` | `env.ts`, `errors.ts`, `format.ts`, `logger.ts` (pino to stderr with redaction), `semaphore.ts` (`Slots`) |
+| `src/utils/` | `env.ts`, `errors.ts`, `fit.ts` (fitting a result under the size cap), `logger.ts` (pino to stderr with redaction), `semaphore.ts` (`Slots`) |
 | `src/metrics/` | `registry.ts` (definitions), `record.ts` (the only recording API; never throws), `normalize.ts` (bounded labels), `server.ts` (listener) |
 | `src/constants.ts` | Shared limits and timing constants |
 
@@ -58,7 +58,7 @@ flowchart LR
   X --> W
 ```
 
-A tool validates input, runs `checkEgress` on target URLs, takes a fetch slot for page fetches, calls the upstream client, maps the result to normalised types, and renders it through `render` and `truncate` in `src/utils/format.ts`.
+A tool validates input, runs `checkEgress` on target URLs, takes a fetch slot for page fetches, calls the upstream client, maps the result to normalised types, and returns it through `reply` in `src/tools/shared.ts`, which serialises it as JSON and fits it under the size cap with `fit` in `src/utils/fit.ts`.
 
 ## Upstream client
 

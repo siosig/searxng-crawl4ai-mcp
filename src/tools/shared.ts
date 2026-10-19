@@ -2,11 +2,10 @@ import type { CallToolResult } from "@modelcontextprotocol/server";
 import { checkEgress } from "../security/egress.js";
 import { env } from "../utils/env.js";
 import { failure, toFailure, type ToolFailure } from "../utils/errors.js";
-import { truncate, cell } from "../utils/format.js";
+import { fit, type TrimStep } from "../utils/fit.js";
 import { Slots } from "../utils/semaphore.js";
 import { logger } from "../utils/logger.js";
 import type { FetchedDocument } from "../upstream/types.js";
-import type { Format } from "../schemas/tools.js";
 import { recordToolCall, recordDocuments } from "../metrics/record.js";
 
 /**
@@ -34,29 +33,22 @@ export const ANNOTATIONS = {
 } as const;
 
 /**
- * Build an MCP response, truncating oversized output and reporting that it did.
+ * Build an MCP response whose text is the JSON serialization of its structured
+ * content.
  *
- * `gathered` is how many items the tool actually obtained, when that is a
- * meaningful number. It changes nothing unless the output had to be cut, and
- * then it is the difference between "the response was too long" and "we found
- * 50 of these and the text stops part way through them" - the second tells the
- * caller that asking for the machine-readable format would hand back all of
- * them, which the first does not.
- *
- * `truncated` is reserved for the size cap and is set here, so `structured`
- * may not carry one: a tool's own flag under that name would be overwritten.
+ * `structured` is fitted under the size cap with the tool's own `steps`, which
+ * say what to cut first. `truncated` and `truncation` are reserved for that cap
+ * and are set here, so `structured` may not carry either: a tool's own field
+ * under one of those names would be overwritten.
  */
 export function reply(
-  markdown: string,
-  structured: Record<string, unknown> & { readonly truncated?: never },
-  format: Format,
-  gathered?: number,
+  structured: Record<string, unknown> & { readonly truncated?: never; readonly truncation?: never },
+  steps: readonly TrimStep[] = [],
 ): CallToolResult {
-  const body = format === "json" ? JSON.stringify(structured, null, 2) : markdown;
-  const { text, truncated } = truncate(body, undefined, gathered);
+  const { value, text } = fit(structured, steps);
   return {
     content: [{ type: "text", text }],
-    structuredContent: { ...structured, truncated },
+    structuredContent: value,
   };
 }
 
@@ -65,7 +57,7 @@ export function reply(
  *
  * `isError` is what makes the result legible *as* a failure. The protocol
  * treats a result without it as a successful call - "If not set, the call is
- * assumed to be successful" - so a body that merely reads "Failed: ..." arrives
+ * assumed to be successful" - so a body that merely describes a failure arrives
  * at the client as a success whose text happens to be discouraging. Setting it
  * is what lets a client surface the call as failed and lets a model recognise
  * that it should try something else.
@@ -76,9 +68,8 @@ export function reply(
  * this function marks is the other thing - the whole call could not be carried
  * out.
  */
-export function replyFailure(f: ToolFailure, format: Format): CallToolResult {
-  const markdown = `**Failed (${f.kind})**: ${f.message}`;
-  return { ...reply(markdown, { status: "failed", failure: f }, format), isError: true };
+export function replyFailure(f: ToolFailure): CallToolResult {
+  return { ...reply({ status: "failed", failure: f }), isError: true };
 }
 
 /**
@@ -88,11 +79,7 @@ export function replyFailure(f: ToolFailure, format: Format): CallToolResult {
  * indication of what to do next; a `ToolFailure` names the cause and implies
  * the next move.
  */
-export async function guarded(
-  name: string,
-  format: Format,
-  body: () => Promise<CallToolResult>,
-): Promise<CallToolResult> {
+export async function guarded(name: string, body: () => Promise<CallToolResult>): Promise<CallToolResult> {
   // Every tool goes through here, so this is the one place that needs to know
   // how a call is measured. Adding a tool cannot forget to be counted.
   const started = process.hrtime.bigint();
@@ -115,7 +102,7 @@ export async function guarded(
     const f = toFailure(error);
     recordToolCall(name, "failure", elapsed(), f.kind);
     logger.warn({ tool: name, kind: f.kind, status: f.upstreamStatus }, "tool failed");
-    return replyFailure(f, format);
+    return replyFailure(f);
   }
 }
 
@@ -149,22 +136,3 @@ export async function partitionByEgress(
   );
   return { allowed, refused };
 }
-
-export function documentMarkdown(doc: FetchedDocument): string {
-  if (doc.status === "failed") {
-    return `### ${doc.url}\n\n**Failed (${doc.failure?.kind})**: ${doc.failure?.message}\n`;
-  }
-  const heading = doc.title ? `### ${doc.title}\n\n${doc.url}` : `### ${doc.url}`;
-  return `${heading}\n\n${doc.markdown ?? ""}\n`;
-}
-
-export function documentsMarkdown(docs: readonly FetchedDocument[]): string {
-  const ok = docs.filter((d) => d.status === "ok").length;
-  const header =
-    docs.length > 1
-      ? `${ok} of ${docs.length} pages fetched.\n\n`
-      : "";
-  return header + docs.map(documentMarkdown).join("\n---\n\n");
-}
-
-export { cell };

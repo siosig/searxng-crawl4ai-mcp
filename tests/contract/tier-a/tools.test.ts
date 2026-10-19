@@ -131,3 +131,94 @@ test("web_search answers, and says which engines did not", async () => {
     "an empty result set is only interpretable alongside this",
   );
 });
+
+interface Truncation {
+  limit: number;
+  originalLength: number;
+  cuts: { path: string; unit: string; original: number; kept: number }[];
+}
+
+const RESPONSE_CAP = 25000;
+
+test("every result's text is its structuredContent, serialised", async () => {
+  const index = `${FIXTURE}/index.html`;
+  const calls: [string, Record<string, unknown>][] = [
+    ["web_scrape", { url: index }],
+    ["web_batch_scrape", { urls: [index, `${FIXTURE}/product.html`, `${FIXTURE}/missing.html`] }],
+    ["web_map", { url: index, includeExternal: true }],
+    ["web_crawl", { url: index, maxDepth: 1, maxPages: 3 }],
+    ["web_search", { query: "example", limit: 3 }],
+    ["web_extract", { url: "http://169.254.169.254/latest/meta-data/", instruction: "the title" }],
+  ];
+
+  for (const [name, args] of calls) {
+    const { text, structured, isError } = await client.call(name, args);
+    assert.deepEqual(JSON.parse(text), structured, `${name}: text is not its structuredContent`);
+    assert.equal(structured.truncated, false, `${name}: a small result must not be cut`);
+    assert.equal(structured.truncation, null, `${name}: no cut, so no truncation record`);
+    if (name === "web_extract") {
+      // The destination policy refuses a link-local address before any fetch.
+      const failure = structured.failure as { kind?: string } | null;
+      assert.equal(isError, true, "a refused extraction must be announced as a failed call");
+      assert.equal(failure?.kind, "egressDenied");
+    }
+  }
+});
+
+test("format is refused before the tool runs", async () => {
+  const calls: [string, Record<string, unknown>][] = [
+    ["web_scrape", { url: `${FIXTURE}/index.html`, format: "json" }],
+    ["web_search", { query: "example", format: "markdown" }],
+  ];
+
+  for (const [name, args] of calls) {
+    const { text, structured, isError } = await client.call(name, args);
+    assert.equal(isError, true, `${name}: an unknown argument must fail the call`);
+    assert.ok(text.startsWith("Input validation error:"), `${name}: unexpected text: ${text.slice(0, 120)}`);
+    assert.equal(Object.keys(structured).length, 0, `${name}: nothing may be structured before the tool runs`);
+  }
+});
+
+test("a page over the cap comes back reduced, as valid JSON", async () => {
+  const { text, structured } = await client.call("web_scrape", { url: `${FIXTURE}/large.html` });
+  assert.equal(structured.status, "ok", JSON.stringify(structured.failure));
+  assert.ok(text.length <= RESPONSE_CAP, `text is ${text.length} chars`);
+  assert.deepEqual(JSON.parse(text), structured);
+
+  const truncation = structured.truncation as Truncation;
+  assert.equal(structured.truncated, true);
+  assert.equal(truncation.limit, RESPONSE_CAP);
+  assert.ok(truncation.originalLength > RESPONSE_CAP);
+  assert.equal(truncation.cuts.length, 1);
+
+  const cut = truncation.cuts[0];
+  assert.ok(cut, "the cut is missing");
+  assert.equal(cut.path, "/markdown");
+  assert.equal(cut.unit, "chars");
+  assert.ok(cut.kept < cut.original);
+  assert.equal(cut.kept, (structured.markdown as string).length);
+});
+
+test("a batch over the cap keeps every document and cuts the long body only", async () => {
+  const { text, structured } = await client.call("web_batch_scrape", {
+    urls: [`${FIXTURE}/index.html`, `${FIXTURE}/large.html`],
+  });
+  const documents = structured.documents as { markdown: string; links: unknown }[];
+  const truncation = structured.truncation as Truncation;
+
+  assert.equal(structured.okCount, 2);
+  assert.equal(structured.failedCount, 0);
+  assert.equal(documents.length, 2);
+  assert.ok(text.length <= RESPONSE_CAP, `text is ${text.length} chars`);
+  assert.deepEqual(truncation.cuts.map((c) => c.path), [
+    "/documents/*/links/internal",
+    "/documents/*/links/external",
+    "/documents/1/markdown",
+  ]);
+  assert.deepEqual(documents[0]?.links, { internal: [], external: [] });
+  assert.equal(documents[1]?.markdown.length, truncation.cuts[2]?.kept);
+  assert.ok(
+    !truncation.cuts.some((c) => c.path === "/documents/0/markdown"),
+    "the short document must not be cut",
+  );
+});

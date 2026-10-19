@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { MapInput } from "../schemas/tools.js";
 import { crawl } from "../upstream/crawl4ai.js";
+import type { TrimStep } from "../utils/fit.js";
 import {
   ANNOTATIONS,
   egressGuard,
@@ -9,6 +10,16 @@ import {
   reply,
   replyFailure,
 } from "./shared.js";
+
+/**
+ * How an over-long link listing is cut down, in order. External links go first
+ * because the main use of this tool is to see the structure of the site itself,
+ * which the internal links carry.
+ */
+export const MAP_STEPS: readonly TrimStep[] = [
+  { kind: "items", path: "/external" },
+  { kind: "items", path: "/internal" },
+];
 
 export function registerMapTool(server: McpServer): void {
   server.registerTool(
@@ -23,9 +34,9 @@ export function registerMapTool(server: McpServer): void {
       annotations: ANNOTATIONS,
     },
     async (params) =>
-      guarded("web_map", params.format, async () => {
+      guarded("web_map", async () => {
         const denied = await egressGuard(params.url);
-        if (denied) return replyFailure(denied, params.format);
+        if (denied) return replyFailure(denied);
 
         const [doc] = await fetchSlots().run(() => crawl([params.url]));
         if (doc === undefined || doc.status === "failed") {
@@ -35,7 +46,6 @@ export function registerMapTool(server: McpServer): void {
               message: "The page could not be fetched.",
               upstreamStatus: null,
             },
-            params.format,
           );
         }
 
@@ -57,28 +67,9 @@ export function registerMapTool(server: McpServer): void {
           uniq(internal).length > internalUnique.length ||
           uniq(external).length > externalUnique.length;
 
-        const lines = [
-          `Links on ${doc.url}`,
-          "",
-          `**Internal (${internalUnique.length})**`,
-          ...internalUnique.map((u) => `- ${u}`),
-        ];
-        if (params.includeExternal) {
-          lines.push("", `**External (${externalUnique.length})**`, ...externalUnique.map((u) => `- ${u}`));
-        }
-        if (limitReached) {
-          lines.push("", `_More links exist; raise \`limit\` to see them._`);
-        }
-
         return reply(
-          lines.join("\n"),
-          {
-            url: doc.url,
-            internal: internalUnique,
-            external: externalUnique,
-            limitReached,
-          },
-          params.format,
+          { url: doc.url, internal: internalUnique, external: externalUnique, limitReached },
+          MAP_STEPS,
         );
       }),
   );

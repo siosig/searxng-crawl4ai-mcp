@@ -8,11 +8,6 @@ import * as z from "zod/v4";
  * looks right and answers a different question.
  */
 
-export const FormatSchema = z
-  .enum(["markdown", "json"])
-  .default("markdown")
-  .describe("Response shape: readable markdown, or json for machine use.");
-
 /**
  * The three ways a search can be narrowed.
  *
@@ -60,14 +55,12 @@ export const SearchInput = z
     categories: z.array(z.string().max(32)).max(8).default(["general"])
       .describe('SearXNG categories, e.g. ["general"], ["news"], ["it"].'),
     ...narrowing,
-    format: FormatSchema,
   })
   .strict();
 
 export const ScrapeInput = z
   .object({
     url: z.url().describe("Page to fetch."),
-    format: FormatSchema,
   })
   .strict();
 
@@ -81,14 +74,12 @@ export const SearchAndScrapeInput = z
     // the other would push a caller back to composing the two tools by hand,
     // which is the work this tool exists to spare them.
     ...narrowing,
-    format: FormatSchema,
   })
   .strict();
 
 export const BatchScrapeInput = z
   .object({
     urls: z.array(z.url()).min(1).max(20).describe("Pages to fetch."),
-    format: FormatSchema,
   })
   .strict();
 
@@ -101,7 +92,6 @@ export const CrawlInput = z
       .describe("Hard cap on pages fetched. The crawl stops here even if more remain."),
     sameHostOnly: z.boolean().default(true)
       .describe("Stay on the starting host. Turning this off can wander far."),
-    format: FormatSchema,
   })
   .strict();
 
@@ -112,7 +102,6 @@ export const MapInput = z
       .describe("Maximum number of URLs to return."),
     includeExternal: z.boolean().default(false)
       .describe("Include links pointing off the starting host."),
-    format: FormatSchema,
   })
   .strict();
 
@@ -121,8 +110,5 @@ export const ExtractInput = z
     url: z.url().describe("Page to extract from."),
     instruction: z.string().min(1).max(2000)
       .describe("What to pull out, in plain language."),
-    format: FormatSchema,
   })
   .strict();
-
-export type Format = z.infer<typeof FormatSchema>;

@@ -1,12 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Slots } from "../../src/utils/semaphore.js";
-import { truncate } from "../../src/utils/format.js";
 import { hostHeaderValidationResponse, originValidationResponse } from "@modelcontextprotocol/server";
 import { isAuthorized, bearerToken } from "../../src/security/auth.js";
 import { UpstreamError, toFailure, failure, type ToolFailure } from "../../src/utils/errors.js";
 import { reply, replyFailure } from "../../src/tools/shared.js";
-import { CHARACTER_LIMIT } from "../../src/constants.js";
 
 test("over-budget fetches are refused, not queued", async () => {
   const slots = new Slots(1);
@@ -37,17 +35,6 @@ test("a slot is released even when the work throws", async () => {
   await assert.rejects(() => slots.run(() => Promise.reject(new Error("boom"))));
   assert.equal(slots.inUse, 0);
   await slots.run(async () => undefined);
-});
-
-test("oversized output is cut and says so", () => {
-  const small = truncate("short");
-  assert.equal(small.truncated, false);
-  assert.equal(small.text, "short");
-
-  const big = truncate("x".repeat(CHARACTER_LIMIT + 5_000));
-  assert.equal(big.truncated, true);
-  assert.ok(big.text.length <= CHARACTER_LIMIT);
-  assert.match(big.text, /truncated/, "a cut response must announce itself");
 });
 
 test("bearer tokens are parsed and compared exactly", () => {
@@ -110,23 +97,31 @@ test("connection problems are classified, not lumped together", () => {
 
 test("a failed call is marked as one, and a successful one is not", () => {
   // Without `isError` the protocol reads a result as successful, so a body
-  // that says "Failed" would still arrive at the client as a success. This is
+  // that reports a failure would still arrive at the client as a success. This is
   // the flag that makes the difference visible; the message alone does not.
-  const failed = replyFailure(failure("egressDenied", "nope"), "markdown");
+  const failed = replyFailure(failure("egressDenied", "nope"));
   assert.equal(failed.isError, true);
   assert.equal(
     (failed.structuredContent as { failure?: ToolFailure }).failure?.kind,
     "egressDenied",
   );
+  assert.deepEqual(JSON.parse((failed.content[0] as { text: string }).text), failed.structuredContent);
+  assert.equal((failed.structuredContent as { status?: string }).status, "failed");
+  assert.equal((failed.structuredContent as { truncated?: boolean }).truncated, false);
+  assert.equal((failed.structuredContent as { truncation?: unknown }).truncation, null);
 
-  const ok = reply("all good", { results: [] }, "markdown");
+  const ok = reply({ results: [] });
   assert.equal(ok.isError, undefined, "a successful result must not claim to be an error");
+  assert.equal(
+    (ok.content[0] as { text: string }).text,
+    JSON.stringify({ results: [], truncated: false, truncation: null }),
+  );
 });
 
 test("a partial batch is a successful call, not a failed one", () => {
   // Some URLs failing is the answer to the question that was asked, not a
   // failure to answer it. Marking it as an error would tell an agent to retry
   // the whole call when the right move is to look at which URLs came back.
-  const partial = reply("1 of 2 pages fetched.", { documents: [{ status: "failed" }] }, "markdown");
+  const partial = reply({ documents: [{ status: "failed" }] });
   assert.equal(partial.isError, undefined);
 });

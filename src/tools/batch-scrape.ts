@@ -1,16 +1,22 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { BatchScrapeInput } from "../schemas/tools.js";
 import { crawl } from "../upstream/crawl4ai.js";
+import type { TrimStep } from "../utils/fit.js";
 import {
   ANNOTATIONS,
   countDocuments,
-  documentsMarkdown,
   fetchSlots,
   guarded,
   partitionByEgress,
   reply,
 } from "./shared.js";
 import type { FetchedDocument } from "../upstream/types.js";
+
+/**
+ * Documents are shortened together, so one large page cannot crowd out the
+ * rest of the batch; the per-URL entries stay in the caller's order.
+ */
+export const BATCH_SCRAPE_STEPS: readonly TrimStep[] = [{ kind: "documents", path: "/documents" }];
 
 export function registerBatchScrapeTool(server: McpServer): void {
   server.registerTool(
@@ -25,7 +31,7 @@ export function registerBatchScrapeTool(server: McpServer): void {
       annotations: ANNOTATIONS,
     },
     async (params) =>
-      guarded("web_batch_scrape", params.format, async () => {
+      guarded("web_batch_scrape", async () => {
         const { allowed, refused } = await partitionByEgress(params.urls);
 
         const fetched =
@@ -68,11 +74,7 @@ export function registerBatchScrapeTool(server: McpServer): void {
         countDocuments(documents);
 
         const okCount = documents.filter((d) => d.status === "ok").length;
-        return reply(
-          documentsMarkdown(documents),
-          { documents, okCount, failedCount: documents.length - okCount },
-          params.format,
-        );
+        return reply({ documents, okCount, failedCount: documents.length - okCount }, BATCH_SCRAPE_STEPS);
       }),
   );
 }
