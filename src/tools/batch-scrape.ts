@@ -36,7 +36,7 @@ export function registerBatchScrapeTool(server: McpServer): void {
 
         const fetched =
           allowed.length > 0
-            ? await fetchSlots().run(() => crawl(allowed))
+            ? await fetchSlots().run(() => crawl(allowed, { keepLinks: params.keepLinks }))
             : [];
         const byUrl = new Map(fetched.map((d) => [d.url, d]));
 
@@ -74,7 +74,7 @@ export function registerBatchScrapeTool(server: McpServer): void {
         countDocuments(documents);
 
         const okCount = documents.filter((d) => d.status === "ok").length;
-        return reply({ documents, okCount, failedCount: documents.length - okCount }, BATCH_SCRAPE_STEPS);
+        return reply({ documents, okCount, failedCount: documents.length - okCount }, BATCH_SCRAPE_STEPS, params.maxChars);
       }),
   );
 }

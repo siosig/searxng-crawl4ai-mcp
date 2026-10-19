@@ -58,7 +58,7 @@ export function registerSearchTool(server: McpServer): void {
         recordSearch(result.results.length, result.unresponsiveEngines);
         // `coverage` reaches the structured output through this spread rather than
         // being assembled here: it is part of the result.
-        return reply({ ...result }, SEARCH_STEPS);
+        return reply({ ...result }, SEARCH_STEPS, params.maxChars);
       }),
   );
 }

@@ -9,9 +9,19 @@
  *
  * Tool output is fed straight into a model context, so an unbounded page dump
  * can crowd out everything else the agent was holding. Responses longer than
- * this are truncated and flagged, rather than silently trimmed.
+ * this are truncated and flagged, rather than silently trimmed. A caller can
+ * raise it per call with maxChars, up to MAX_CHARACTER_LIMIT.
  */
 export const CHARACTER_LIMIT = 25_000;
+
+/**
+ * The most a caller can raise CHARACTER_LIMIT to with maxChars.
+ *
+ * Matches the largest result Claude Code accepts as a single tool result
+ * (500,000 characters); Claude Code saves anything over 50,000 to a file
+ * instead of the conversation, which is what makes a raised cap affordable.
+ */
+export const MAX_CHARACTER_LIMIT = 500_000;
 
 /**
  * Default number of page fetches allowed to run at the same time.

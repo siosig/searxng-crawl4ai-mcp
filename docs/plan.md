@@ -1,6 +1,6 @@
 ---
 description: "How searxng-crawl4ai-mcp is built and deployed, and why: design constraints and their guards, module layout, upstream client and retry policy, crawl and search sequencing, the login-session mechanism, the compose stack, Ansible roles, egress guard, crawl4ai memory and restarts, observability, CI and tests. Read before changing code structure, upstream calls, containers, deployment or tests."
-updated: 2026-10-16
+updated: 2026-10-19
 keywords: [architecture, design, upstream, retry, Crawl4AI, SearXNG, compose, Ansible, egress guard, iptables, watchdog, login-session, Alloy, CI, contract tests, versions.env]
 ---
 
@@ -94,7 +94,9 @@ Crawl4AI refuses `deep_crawl_strategy` from any HTTP caller and no token or sett
 
 ## Readable versus raw markdown
 
-`web_scrape` and degraded `web_extract` call `getMarkdown`, which sends `READABLE_CONFIG` (`DefaultMarkdownGenerator` with `PruningContentFilter`) and returns the `fit` markdown without links. The multi-document tools send `STREAM_CONFIG` and return `raw` markdown with links, because their callers need the links (crawl frontier, map) or the full text of several pages.
+`web_scrape` and degraded `web_extract` call `getMarkdown`, which asks for the readable read (`DefaultMarkdownGenerator` with `PruningContentFilter`) and returns the `fit` markdown, from which the filter has already removed images. The multi-document tools ask for the plain read and return `raw` markdown, because their callers need the full text of several pages; the crawl frontier and `web_map` come from the result's `links` field, not from the markdown.
+
+`crawlerConfig(readable, keepLinks)` in `src/upstream/crawl4ai.ts` builds the `crawler_config` for both. With `keepLinks` it returns `READABLE_CONFIG` or `STREAM_CONFIG` unchanged. Otherwise it adds `options: STRIP_OPTIONS` (`{ignore_links: true, images_to_alt: true}`) to the generator's params, so html2text drops link targets and image sources while converting the HTML; text that merely looks like a link is never touched, which a regex over the markdown could not guarantee. Crawl4AI 0.9.4 accepts `options` only because `DefaultMarkdownGenerator` has no entry in its untrusted-field allowlist; if it gains one without `options`, the field would be dropped silently, and the contract test "markdown options still strip link targets" (`tests/contract/tier-a/upstream.test.ts`) fails on that. `web_map` passes no `keepLinks`, so its read is stripped too; it discards the markdown and uses only `links`, which the options do not change.
 
 ## Login session design
 

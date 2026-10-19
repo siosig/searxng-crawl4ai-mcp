@@ -66,7 +66,8 @@ long. The rule is a single budget rather than a list of special cases, so
 retrying never adds more than two seconds to any call.
 `web_crawl` also reports why it stopped - a page limit, a depth limit or nothing
 left to visit - so a truncated crawl is visible instead of looking complete.
-Every response is JSON, capped at 25,000 characters; a result that would be longer is reduced inside its structure and lists what was cut.
+Every response is JSON, capped at 25,000 characters by default; a result that would be longer is reduced inside its structure and lists what was cut. A caller that needs the full content can raise the cap per call with `maxChars`, up to 500,000.
+Page markdown drops link targets and image sources by default, keeping the anchor text and alt text, which roughly halves a link-heavy page; pass `keepLinks: true` to keep them.
 
 ## Two ways to run it
 
@@ -365,13 +366,13 @@ A call that fails as a whole returns `isError: true` and `structuredContent.stat
 - `"blocked"` — the target refused automated access (403, 429 or an anti-bot page)
 - `"concurrencyLimit"` — all fetch slots are busy; retry shortly
 
-Distinguish between these when deciding what to do next. `egressDenied` means the target is blocked by policy; `unreachable` or `timeout` means trying again later might work; `httpError` with `upstreamStatus` 404 means the page does not exist. A result longer than 25,000 characters is reduced to fit, still as valid JSON; that is reported as `truncated: true` with `truncation.cuts` listing what was removed, not as a failure. The complete list of kinds is in [docs/spec.md](docs/spec.md).
+Distinguish between these when deciding what to do next. `egressDenied` means the target is blocked by policy; `unreachable` or `timeout` means trying again later might work; `httpError` with `upstreamStatus` 404 means the page does not exist. A result longer than the size cap (25,000 characters unless `maxChars` raises it) is reduced to fit, still as valid JSON; that is reported as `truncated: true` with `truncation.cuts` listing what was removed, not as a failure. The complete list of kinds is in [docs/spec.md](docs/spec.md).
 
 ### Rate limiting and budgets
 
 - Each upstream request has its own timeout (30 seconds per search result page, 120 seconds for page fetches, 180 seconds for extraction). Requests to SearXNG or Crawl4AI that fail quickly are retried with backoff, but those that exhaust their timeout are not, because repeating them would double the wait.
 - Large crawls may return fewer pages than requested if they hit the page limit or the depth limit. The response reports which limit was reached (`stoppedAt`).
-- Responses are capped at 25,000 characters. When a result is reduced, `truncated` is `true` and `truncation.cuts` says what was removed; re-fetch with narrower parameters (fewer URLs, a lower page limit, a more specific query).
+- Responses are capped at 25,000 characters by default; every tool takes `maxChars` (25,000 to 500,000) to raise the cap for one call. When a result is reduced, `truncated` is `true` and `truncation.cuts` says what was removed; re-fetch with narrower parameters (fewer URLs, a lower page limit, a more specific query) or a higher `maxChars`. Some clients, Claude Code among them, save a result over 50,000 characters to a file and put only its path in the conversation.
 
 ## Development
 

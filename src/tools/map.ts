@@ -70,6 +70,7 @@ export function registerMapTool(server: McpServer): void {
         return reply(
           { url: doc.url, internal: internalUnique, external: externalUnique, limitReached },
           MAP_STEPS,
+          params.maxChars,
         );
       }),
   );

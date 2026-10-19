@@ -36,11 +36,11 @@ export function registerScrapeTool(server: McpServer): void {
         const denied = await egressGuard(params.url);
         if (denied) return replyFailure(denied);
 
-        const doc = await fetchSlots().run(() => getMarkdown(params.url));
+        const doc = await fetchSlots().run(() => getMarkdown(params.url, { keepLinks: params.keepLinks }));
         countDocuments([doc]);
         // The one page asked for is the whole call, so its failure is the call's.
         if (doc.status === "failed") return replyFailure(doc.failure!);
-        return reply({ ...doc }, SCRAPE_STEPS);
+        return reply({ ...doc }, SCRAPE_STEPS, params.maxChars);
       }),
   );
 }

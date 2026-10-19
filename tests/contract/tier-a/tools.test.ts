@@ -222,3 +222,103 @@ test("a batch over the cap keeps every document and cuts the long body only", as
     "the short document must not be cut",
   );
 });
+
+const LINKS = `${FIXTURE}/links.html`;
+
+// What links.html must lose, and keep, when link targets are stripped.
+const LINK_TARGETS = ["about.html", "archive_", "The 1890 archive", "example.com/code"];
+const ANCHOR_TEXTS = ["Plain anchor text", "Titled anchor text", "Code anchor text", "[literal](text)"];
+const IMAGE_SOURCES = ["harbour.png", "logo.png", "divider.png"];
+const IMAGE_ALTS = ["Harbour photo alt", "Linked image alt"];
+
+test("a page's markdown keeps anchor text and drops link targets by default", async () => {
+  const { structured } = await client.call("web_scrape", { url: LINKS });
+  assert.equal(structured.status, "ok", JSON.stringify(structured.failure));
+  const markdown = String(structured.markdown);
+  for (const target of LINK_TARGETS) {
+    assert.ok(!markdown.includes(target), `link target survived: ${target}`);
+  }
+  let previous = -1;
+  for (const anchor of ANCHOR_TEXTS) {
+    const at = markdown.indexOf(anchor);
+    assert.ok(at >= 0, `anchor text is missing: ${anchor}`);
+    assert.ok(at > previous, `anchor text is out of order: ${anchor}`);
+    previous = at;
+  }
+});
+
+test("keepLinks returns a page's links as they were", async () => {
+  const { structured } = await client.call("web_scrape", { url: LINKS, keepLinks: true });
+  assert.equal(structured.status, "ok", JSON.stringify(structured.failure));
+  const markdown = String(structured.markdown);
+  assert.ok(markdown.includes("about.html"), "about.html is missing");
+  assert.ok(markdown.includes("archive_"), "archive_ is missing");
+});
+
+test("a batch's markdown turns images into their alt text, links list untouched", async () => {
+  interface BatchDocument {
+    status: string;
+    markdown: string;
+    links: { internal: unknown[] };
+  }
+  const first = await client.call("web_batch_scrape", { urls: [LINKS] });
+  const stripped = (first.structured.documents as BatchDocument[])[0];
+  assert.ok(stripped, "the document is missing");
+  assert.equal(stripped.status, "ok");
+  for (const target of [...LINK_TARGETS, ...IMAGE_SOURCES]) {
+    assert.ok(!stripped.markdown.includes(target), `survived stripping: ${target}`);
+  }
+  for (const text of [...ANCHOR_TEXTS, ...IMAGE_ALTS]) {
+    assert.ok(stripped.markdown.includes(text), `missing after stripping: ${text}`);
+  }
+  assert.ok(Array.isArray(stripped.links.internal));
+  assert.ok(stripped.links.internal.length >= 1, "links.internal must stay populated");
+
+  const second = await client.call("web_batch_scrape", { urls: [LINKS], keepLinks: true });
+  const kept = (second.structured.documents as BatchDocument[])[0];
+  assert.ok(kept, "the document is missing with keepLinks");
+  assert.ok(kept.markdown.includes("harbour.png"), "harbour.png is missing with keepLinks");
+  assert.ok(kept.markdown.includes("about.html"), "about.html is missing with keepLinks");
+  assert.ok(Array.isArray(kept.links.internal));
+  assert.ok(kept.links.internal.length >= 1, "links.internal must stay populated with keepLinks");
+});
+
+test("a crawl follows the same pages whether or not links are stripped", async () => {
+  const pathnames = (structured: Record<string, unknown>): string[] =>
+    [...new Set((structured.documents as { url: string }[]).map((d) => new URL(d.url).pathname))].sort();
+
+  const stripped = await client.call("web_crawl", { url: LINKS, maxDepth: 1, maxPages: 5 });
+  const strippedPaths = pathnames(stripped.structured);
+  assert.ok(strippedPaths.includes("/about.html"), `crawled: ${strippedPaths.join(", ")}`);
+  assert.ok(strippedPaths.includes("/product.html"), `crawled: ${strippedPaths.join(", ")}`);
+
+  const kept = await client.call("web_crawl", { url: LINKS, maxDepth: 1, maxPages: 5, keepLinks: true });
+  assert.deepEqual(pathnames(kept.structured), strippedPaths);
+});
+
+test("maxChars raises the cap a page is fitted to", async () => {
+  const url = `${FIXTURE}/large.html`;
+
+  const raised = await client.call("web_scrape", { url, maxChars: 100000 });
+  assert.equal(raised.structured.status, "ok", JSON.stringify(raised.structured.failure));
+  assert.equal(raised.structured.truncated, false);
+  assert.equal(raised.structured.truncation, null);
+  assert.ok(raised.text.length > RESPONSE_CAP, `text is ${raised.text.length} chars`);
+  assert.deepEqual(JSON.parse(raised.text), raised.structured);
+
+  const fitted = await client.call("web_scrape", { url, maxChars: 30000 });
+  assert.equal(fitted.structured.truncated, true);
+  assert.equal((fitted.structured.truncation as Truncation).limit, 30000);
+  assert.ok(fitted.text.length <= 30000, `text is ${fitted.text.length} chars`);
+  assert.ok(fitted.text.length > RESPONSE_CAP, `text is ${fitted.text.length} chars`);
+  assert.deepEqual(JSON.parse(fitted.text), fitted.structured);
+});
+
+test("maxChars out of range is refused before the tool runs", async () => {
+  for (const maxChars of [24999, 500001]) {
+    const { text, structured, isError } = await client.call("web_scrape", { url: LINKS, maxChars });
+    assert.equal(isError, true, `maxChars ${maxChars}: an out-of-range value must fail the call`);
+    assert.ok(text.startsWith("Input validation error:"), `maxChars ${maxChars}: unexpected text: ${text.slice(0, 120)}`);
+    assert.equal(Object.keys(structured).length, 0, `maxChars ${maxChars}: nothing may be structured before the tool runs`);
+  }
+});

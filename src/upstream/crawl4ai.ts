@@ -64,6 +64,11 @@ export interface CrawlOptions {
    * Batch and crawl callers want every link and paragraph, so they leave it off.
    */
   readonly readable?: boolean;
+  /**
+   * Keep link targets and image sources in the markdown. Absent means they are
+   * stripped, which is what every tool asks for unless its caller says otherwise.
+   */
+  readonly keepLinks?: boolean;
   readonly operation?: UpstreamOperation;
 }
 
@@ -90,6 +95,37 @@ const READABLE_CONFIG = {
     params: { content_filter: { type: "PruningContentFilter", params: {} } },
   },
 } as const;
+
+/**
+ * html2text settings that drop link targets and image sources from the
+ * generated markdown, keeping anchor text and alt text. Applied while the HTML
+ * is converted, so nothing that merely looks like a link in the text - code, an
+ * escaped bracket - can be mistaken for one.
+ *
+ * The server accepts `options` because DefaultMarkdownGenerator has no entry in
+ * its untrusted-field allowlist, and a type without one keeps every field that
+ * is not globally forbidden. Should it gain an entry without `options`, the
+ * field would be dropped silently rather than refused; the contract test
+ * "markdown options still strip link targets" checks the output for that.
+ */
+const STRIP_OPTIONS = { ignore_links: true, images_to_alt: true } as const;
+
+/**
+ * The crawler_config sent with a read. With keepLinks the request is exactly
+ * what it was before link stripping existed.
+ */
+export function crawlerConfig(readable: boolean, keepLinks: boolean): Record<string, unknown> {
+  if (keepLinks) return readable ? READABLE_CONFIG : STREAM_CONFIG;
+  return {
+    stream: true,
+    markdown_generator: {
+      type: "DefaultMarkdownGenerator",
+      params: readable
+        ? { content_filter: { type: "PruningContentFilter", params: {} }, options: STRIP_OPTIONS }
+        : { options: STRIP_OPTIONS },
+    },
+  };
+}
 
 function token(): string {
   return env().CRAWL4AI_API_TOKEN;
@@ -309,7 +345,7 @@ export async function crawl(
   const { body } = await request<unknown[]>(base("/crawl/stream"), {
     method: "POST",
     token: token(),
-    body: { urls: [...urls], crawler_config: readable ? READABLE_CONFIG : STREAM_CONFIG },
+    body: { urls: [...urls], crawler_config: crawlerConfig(readable, options.keepLinks === true) },
     responseFormat: "ndjson",
     // A POST that creates nothing: the server fetches the pages and answers
     // with what it read, keeping no record of having been asked. Sending it
@@ -323,8 +359,11 @@ export async function crawl(
 }
 
 /** Fetch a single URL as readable markdown. */
-export async function getMarkdown(url: string): Promise<FetchedDocument> {
-  const [doc] = await crawl([url], { readable: true, operation: "markdown" });
+export async function getMarkdown(
+  url: string,
+  options: { readonly keepLinks?: boolean } = {},
+): Promise<FetchedDocument> {
+  const [doc] = await crawl([url], { readable: true, operation: "markdown", keepLinks: options.keepLinks === true });
   // A single-page read has never returned links; keep its output that size.
   return { ...doc!, links: null };
 }

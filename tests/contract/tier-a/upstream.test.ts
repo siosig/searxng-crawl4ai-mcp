@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { crawlerConfig } from "../../../src/upstream/crawl4ai.js";
 
 /**
  * The upstream HTTP contract, checked directly.
@@ -66,11 +67,14 @@ test("Crawl4AI refuses unauthenticated API calls", async () => {
 
 const FIXTURE_PAGE = process.env.FIXTURE_PROBE ?? "http://fixture-site/index.html";
 
-async function streamLines(url: string): Promise<{ status: number; lines: Record<string, unknown>[] }> {
+async function streamLines(
+  url: string,
+  config: Record<string, unknown> = { stream: true },
+): Promise<{ status: number; lines: Record<string, unknown>[] }> {
   const res = await fetch(`${CRAWL4AI}/crawl/stream`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
-    body: JSON.stringify({ urls: [url], crawler_config: { stream: true } }),
+    body: JSON.stringify({ urls: [url], crawler_config: config }),
   });
   const text = await res.text();
   if (res.status !== 200) return { status: res.status, lines: [] };
@@ -296,4 +300,45 @@ test("GET /llm/{url} answers with an extraction, not only a route", { skip: keye
   assert.equal(res.status, 200, "extraction failed with a model credential present");
   const body = await res.text();
   assert.ok(body.trim().length > 0, "extraction returned nothing");
+});
+
+test("markdown options still strip link targets", async () => {
+  const url = new URL("links.html", FIXTURE_PAGE).toString();
+  const message =
+    "Crawl4AI no longer applies markdown_generator.params.options; src/upstream/crawl4ai.ts STRIP_OPTIONS is being dropped";
+  const common = ["about.html", "archive_", "The 1890 archive", "example.com/code"];
+  const commonKept = ["Plain anchor text", "Titled anchor text", "Code anchor text", "[literal](text)"];
+  const cases = [
+    {
+      config: crawlerConfig(true, false),
+      field: "fit_markdown",
+      absent: common,
+      present: commonKept,
+    },
+    {
+      config: crawlerConfig(false, false),
+      field: "raw_markdown",
+      absent: [...common, "harbour.png", "logo.png", "divider.png"],
+      present: [...commonKept, "Harbour photo alt", "Linked image alt"],
+    },
+  ];
+
+  for (const { config, field, absent, present } of cases) {
+    const { status, lines } = await streamLines(url, config);
+    assert.equal(status, 200, `${field}: ${message}`);
+    const result = lines.find((line) => typeof line.url === "string");
+    assert.ok(result, `${field}: no per-URL line came back`);
+    assert.equal(result.success, true, `${field}: the crawl failed`);
+    const body = (result.markdown as Record<string, unknown>)[field];
+    assert.equal(typeof body, "string", `${field}: markdown field is not a string`);
+    const text = body as string;
+    for (const needle of absent) {
+      assert.ok(!text.includes(needle), `${field} still contains "${needle}": ${message}`);
+    }
+    for (const needle of present) {
+      assert.ok(text.includes(needle), `${field} lost "${needle}": ${message}`);
+    }
+    const internal = (result.links as { internal?: unknown[] }).internal;
+    assert.ok(Array.isArray(internal) && internal.length >= 1, `${field}: links.internal is empty: ${message}`);
+  }
 });

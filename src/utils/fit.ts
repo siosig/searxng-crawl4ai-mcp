@@ -8,7 +8,7 @@
  * structured value therefore always carry the same content.
  */
 
-import { CHARACTER_LIMIT } from "../constants.js";
+import { CHARACTER_LIMIT, MAX_CHARACTER_LIMIT } from "../constants.js";
 
 export interface Cut {
   /** JSON Pointer (RFC 6901). A "*" segment stands for every element of an array. "" is the whole result. */
@@ -22,7 +22,7 @@ export interface Cut {
 }
 
 export interface Truncation {
-  /** The cap the text was fitted to (CHARACTER_LIMIT). */
+  /** The cap the text was fitted to: the caller's maxChars, CHARACTER_LIMIT by default. */
   readonly limit: number;
   /** Length of the text the untrimmed result would have produced, with truncated: false and truncation: null. */
   readonly originalLength: number;
@@ -47,7 +47,8 @@ export interface Fitted {
 
 export const TRUNCATION_ADVICE =
   "The response exceeded the size limit and was reduced; cuts lists what was removed. " +
-  "Narrow the request - fewer URLs, a lower page limit, or a more specific query.";
+  "Narrow the request - fewer URLs, a lower page limit, or a more specific query - " +
+  `or raise maxChars (at most ${MAX_CHARACTER_LIMIT}).`;
 
 interface Ctx {
   readonly limit: number;

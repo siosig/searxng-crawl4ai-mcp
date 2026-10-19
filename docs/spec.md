@@ -1,6 +1,6 @@
 ---
 description: "External contract of the searxng-crawl4ai-mcp server: transports, authentication, the seven MCP tools (inputs, outputs, limits), failure kinds, outbound policy, configuration variables and metric names. Read before changing tool behaviour, schemas, error handling, configuration or metrics."
-updated: 2026-10-16
+updated: 2026-10-19
 keywords: [MCP, tools, web_search, web_scrape, web_crawl, failure kind, FailureKind, env, environment variables, metrics, Prometheus, SSRF, egress]
 ---
 
@@ -42,10 +42,12 @@ The listener binds all interfaces on `PORT`. The deployment publishes it on host
 - A whole-call failure carries `isError: true` and `structuredContent = {status: "failed", failure: {kind, message, upstreamStatus}, truncated, truncation}`.
 - Per-URL failures inside `web_batch_scrape`, `web_crawl` and `web_search_and_scrape` are not whole-call failures: each document carries its own `status` and `failure`, and the call succeeds.
 - A fetched document (`FetchedDocument` in `src/upstream/types.ts`) has `url`, `finalUrl` (after redirects, or `null`), `status` (`"ok"` or `"failed"`), `markdown`, `title`, `links` and `failure`. `markdown` is the page's readable content as a string value.
+- Every tool takes `maxChars` (integer, 25,000-500,000, default 25,000): the size cap for that call ("Response size cap and truncation"). A value outside the range is a schema violation.
+- The tools that return page markdown (`web_scrape`, `web_search_and_scrape`, `web_batch_scrape`, `web_crawl`, and `web_extract` when degraded) take `keepLinks` (boolean, default `false`). By default a link `[text](url "title")` becomes `text` and an image `![alt](src)` becomes `alt` (nothing when `alt` is empty); the conversion happens while the HTML is turned into markdown, so text that only looks like a link (inside code, or escaped brackets) is left as it is. With `keepLinks: true` links and images stay as they were. `keepLinks` does not affect a `links` list returned beside the markdown, nor the links `web_crawl` follows.
 
 ## Response size cap and truncation
 
-`CHARACTER_LIMIT` (`src/constants.ts`) is 25,000 characters, counted as the `.length` (UTF-16 code units) of `text`. It is enforced on the serialised JSON, escapes included, so `text` is never longer than the cap and is always valid JSON. `structuredContent` holds exactly what `text` holds: nothing removed from one is kept in the other.
+The cap is `maxChars` when the call gives it, otherwise `CHARACTER_LIMIT` (`src/constants.ts`, 25,000 characters); `maxChars` can only raise it, up to `MAX_CHARACTER_LIMIT` (500,000). It is counted as the `.length` (UTF-16 code units) of `text`. No tool declares `_meta["anthropic/maxResultSizeChars"]`, so a client such as Claude Code that moves a result over 50,000 characters to a file keeps doing so for a raised cap. The cap is enforced on the serialised JSON, escapes included, so `text` is never longer than the cap and is always valid JSON. `structuredContent` holds exactly what `text` holds: nothing removed from one is kept in the other.
 
 A result that would be longer is reduced inside its structure, never by cutting the serialised string (`fit` in `src/utils/fit.ts`). Each tool lists the reductions it allows, and they are applied in order, each only while the result is still over the cap:
 
@@ -76,11 +78,11 @@ When anything was cut, `truncated` is `true` and `truncation` is:
     {"path": "/documents/*/links/internal", "unit": "items", "original": 812, "kept": 0},
     {"path": "/documents/3/markdown", "unit": "chars", "original": 30512, "kept": 4980}
   ],
-  "advice": "The response exceeded the size limit and was reduced; cuts lists what was removed. Narrow the request - fewer URLs, a lower page limit, or a more specific query."
+  "advice": "The response exceeded the size limit and was reduced; cuts lists what was removed. Narrow the request - fewer URLs, a lower page limit, or a more specific query - or raise maxChars (at most 500000)."
 }
 ```
 
-- `limit` is the cap; `originalLength` is the length `text` would have had without any cut.
+- `limit` is the cap in force for the call (`maxChars` or the default); `originalLength` is the length `text` would have had without any cut.
 - Each cut names a JSON Pointer (RFC 6901) `path`; a `*` segment stands for every element of the array, and `""` for the whole result. `unit` is `"chars"` (a string shortened or set to `null`, counted in UTF-16 code units, or another value set to `null`, counted as its serialised length) or `"items"` (array elements dropped from the end). `original` and `kept` are in that unit.
 - Cuts are listed in the order they were made. Only documents whose body was actually shortened get a cut.
 - Counters that describe the work done (`pagesFetched` in `web_crawl`, `okCount` and `failedCount` in `web_batch_scrape`) are not changed by a cut, so `documents` may hold fewer entries than they count; the `/documents` cut gives the original number.
@@ -138,8 +140,9 @@ Fetches one page and returns its readable content as markdown, rendering JavaScr
 | Parameter | Type | Default | Constraint |
 |---|---|---|---|
 | `url` | URL | required | |
+| `keepLinks` | boolean | `false` | see "Common tool contract" |
 
-Output is one `FetchedDocument` with `status: "ok"`, readable markdown (boilerplate removed) and `links: null`. A failed fetch is a whole-call failure.
+Output is one `FetchedDocument` with `status: "ok"`, readable markdown (boilerplate and images removed) and `links: null`. A failed fetch is a whole-call failure.
 
 ## Tool web_search_and_scrape
 
@@ -151,8 +154,9 @@ Searches, then fetches the top hits in one call.
 | `topN` | integer | 3 | 1-10; also the search `limit` |
 | `language` | string | `"auto"` | max 16 chars |
 | `engines`, `timeRange`, `safesearch` | as in "Tool web_search" | omitted | |
+| `keepLinks` | boolean | `false` | see "Common tool contract" |
 
-There is no `categories` and no `limit`. Output: `{search: SearchResult, documents: FetchedDocument[]}`, documents in hit order. A hit refused by the outbound policy, or without a result, is a failed document; the call still succeeds. Zero hits returns `documents: []`. Documents carry raw markdown with links.
+There is no `categories` and no `limit`. Output: `{search: SearchResult, documents: FetchedDocument[]}`, documents in hit order. A hit refused by the outbound policy, or without a result, is a failed document; the call still succeeds. Zero hits returns `documents: []`. Documents carry the full (unfiltered) markdown, with links only when `keepLinks` is true.
 
 ## Tool web_batch_scrape
 
@@ -161,8 +165,9 @@ Fetches a list of pages; each URL succeeds or fails on its own.
 | Parameter | Type | Default | Constraint |
 |---|---|---|---|
 | `urls` | URL[] | required | 1-20 items |
+| `keepLinks` | boolean | `false` | see "Common tool contract" |
 
-Output: `{documents, okCount, failedCount}`, documents in input order. A batch in which every URL failed is still not a whole-call failure. The whole batch uses one fetch slot. Documents carry raw markdown with links.
+Output: `{documents, okCount, failedCount}`, documents in input order. A batch in which every URL failed is still not a whole-call failure. The whole batch uses one fetch slot. Documents carry the full (unfiltered) markdown, with links only when `keepLinks` is true.
 
 ## Tool web_crawl
 
@@ -174,6 +179,7 @@ Starts at a URL and follows links level by level, synchronously.
 | `maxDepth` | integer | 2 | 1-5 link hops |
 | `maxPages` | integer | 20 | 1-100 pages |
 | `sameHostOnly` | boolean | `true` | compares `URL.host` |
+| `keepLinks` | boolean | `false` | see "Common tool contract"; links are followed either way |
 
 Output: `{start, state: "completed", pagesFetched, depthReached, stoppedAt, documents}`. `start` is the start URL without its fragment. `pagesFetched` counts failed pages too. Reaching a cap ends the crawl normally. `stoppedAt`:
 
@@ -205,6 +211,7 @@ Pulls fields described in plain language out of a page, using the LLM configured
 |---|---|---|---|
 | `url` | URL | required | |
 | `instruction` | string | required | 1-2000 chars |
+| `keepLinks` | boolean | `false` | applies only to the degraded `markdown`; see "Common tool contract" |
 
 With `GEMINI_API_KEY` set, the output is `{url, data, degraded: false, markdown: null, failure: null}`, where `data` is the upstream JSON as returned (shape not fixed). The extraction request has a 180-second timeout. Without `GEMINI_API_KEY`, the tool does not fail: it returns `{url, data: null, degraded: true, markdown, failure: null}` with the page's readable markdown, and `instruction` is unused. `web_extract` does not detect an expired login, because the upstream does not return the final URL.
 

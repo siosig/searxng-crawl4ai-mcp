@@ -41,3 +41,25 @@ test(
     assert.ok((crawl.structured.pagesFetched as number) >= 1);
   },
 );
+
+test(
+  "degraded web_extract strips link targets unless keepLinks is set",
+  { skip: degradedRun ? false : "set DEGRADED_RUN=1 on a stack started without GEMINI_API_KEY" },
+  async () => {
+    const args = { url: `${FIXTURE}/links.html`, instruction: "the anchor texts" };
+
+    const stripped = await client.call("web_extract", args);
+    assert.equal(stripped.structured.degraded, true);
+    assert.equal(stripped.structured.failure, null);
+    const markdown = String(stripped.structured.markdown);
+    assert.ok(!markdown.includes("about.html"), "link targets must be removed");
+    assert.ok(!markdown.includes("archive_"), "link targets must be removed");
+    assert.ok(!markdown.includes("The 1890 archive"), "link titles must be removed");
+    assert.ok(markdown.includes("Plain anchor text"), "anchor text must remain");
+    assert.ok(markdown.includes("Titled anchor text"), "anchor text must remain");
+
+    const kept = await client.call("web_extract", { ...args, keepLinks: true });
+    assert.equal(kept.structured.degraded, true);
+    assert.ok(String(kept.structured.markdown).includes("about.html"), "keepLinks must retain link targets");
+  },
+);

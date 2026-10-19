@@ -18,7 +18,7 @@ import { BATCH_SCRAPE_STEPS } from "../../src/tools/batch-scrape.js";
 import { CRAWL_STEPS } from "../../src/tools/crawl.js";
 import { SEARCH_AND_SCRAPE_STEPS } from "../../src/tools/search-and-scrape.js";
 import { reply } from "../../src/tools/shared.js";
-import type { Cut, TrimStep } from "../../src/utils/fit.js";
+import { TRUNCATION_ADVICE, type Cut, type TrimStep } from "../../src/utils/fit.js";
 
 validateEnv({
   SEARXNG_URL: "http://searxng.test",
@@ -178,4 +178,31 @@ test("SEARCH_AND_SCRAPE_STEPS trims the documents and keeps the search results",
   const { value, cuts } = run({ search: searchResult(3), documents: threeDocs() }, SEARCH_AND_SCRAPE_STEPS);
   assert.deepEqual(cuts.map((c) => c.path), DOCUMENT_CUT_PATHS);
   assert.equal(((value["search"] as Obj)["results"] as unknown[]).length, 3);
+});
+
+test("a caller's maxChars is the cap the text is fitted to", () => {
+  const structured = { url: "https://site.test/0", markdown: "a".repeat(40_000) };
+  const r = reply(structured, SCRAPE_STEPS, 30_000);
+  const text = (r.content[0] as { text: string }).text;
+  assert.ok(text.length <= 30_000, `text is ${text.length} long, over 30000`);
+  assert.ok(text.length > 25_000, `text is ${text.length} long, not past 25000`);
+  assert.equal(text, JSON.stringify(r.structuredContent));
+  const value = r.structuredContent as Obj;
+  assert.equal(value["truncated"], true);
+  const truncation = value["truncation"] as { limit: number; advice: string };
+  assert.equal(truncation.limit, 30_000);
+  assert.equal(truncation.advice, TRUNCATION_ADVICE);
+});
+
+test("without maxChars the cap stays at 25000", () => {
+  const structured = { url: "https://site.test/0", markdown: "a".repeat(40_000) };
+  const r = reply(structured, SCRAPE_STEPS);
+  const text = (r.content[0] as { text: string }).text;
+  const truncation = (r.structuredContent as Obj)["truncation"] as { limit: number };
+  assert.equal(truncation.limit, 25_000);
+  assert.ok(text.length <= 25_000, `text is ${text.length} long, over 25000`);
+});
+
+test("the advice names maxChars and its maximum", () => {
+  assert.ok(TRUNCATION_ADVICE.endsWith("or raise maxChars (at most 500000)."));
 });

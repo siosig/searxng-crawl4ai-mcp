@@ -163,3 +163,120 @@ test("a batch with one denied URL succeeds and reports the failure per document"
     await session.close();
   }
 });
+
+interface ListedTool {
+  name: string;
+  inputSchema: { properties?: Record<string, Record<string, unknown>> };
+  _meta?: Record<string, unknown>;
+}
+
+async function listTools(session: Session): Promise<ListedTool[]> {
+  const listed = (await session.request("tools/list", {})) as { tools: ListedTool[] };
+  return listed.tools;
+}
+
+test("every tool takes maxChars from 25000 to 500000, 25000 by default", async () => {
+  const session = await open();
+  try {
+    const tools = await listTools(session);
+    assert.equal(tools.length, TOOL_NAMES.length);
+    for (const tool of tools) {
+      const prop = tool.inputSchema.properties?.["maxChars"];
+      assert.ok(prop, `${tool.name} has no maxChars`);
+      assert.equal(prop["type"], "integer", tool.name);
+      assert.equal(prop["minimum"], 25000, tool.name);
+      assert.equal(prop["maximum"], 500000, tool.name);
+      assert.equal(prop["default"], 25000, tool.name);
+      assert.equal(typeof prop["description"], "string", tool.name);
+      assert.ok(
+        (prop["description"] as string).startsWith("Upper bound on the length of this result's text"),
+        tool.name,
+      );
+    }
+  } finally {
+    await session.close();
+  }
+});
+
+test("keepLinks is offered by exactly the tools that return a page body", async () => {
+  const session = await open();
+  try {
+    const tools = await listTools(session);
+    const offering = tools.filter((tool) => tool.inputSchema.properties?.["keepLinks"] !== undefined);
+    assert.deepEqual(offering.map((tool) => tool.name).sort(), [
+      "web_batch_scrape",
+      "web_crawl",
+      "web_extract",
+      "web_scrape",
+      "web_search_and_scrape",
+    ]);
+    for (const tool of offering) {
+      const prop = tool.inputSchema.properties!["keepLinks"]!;
+      assert.equal(prop["type"], "boolean", tool.name);
+      assert.equal(prop["default"], false, tool.name);
+      const description = prop["description"] as string;
+      const start = tool.name === "web_extract" ? "Applies only when extraction is unavailable" : "Keep links in the page markdown";
+      assert.ok(description.startsWith(start), `${tool.name}: ${description}`);
+    }
+  } finally {
+    await session.close();
+  }
+});
+
+test("no tool declares a result size for the client", async () => {
+  const session = await open();
+  try {
+    for (const tool of await listTools(session)) {
+      assert.equal(tool._meta?.["anthropic/maxResultSizeChars"], undefined, tool.name);
+    }
+  } finally {
+    await session.close();
+  }
+});
+
+test("maxChars outside 25000-500000, or not an integer, is a schema violation", async () => {
+  const session = await open();
+  try {
+    for (const name of TOOL_NAMES) {
+      for (const value of [24999, 500001, 30000.5]) {
+        const reply = await call(session, name, { ...MINIMAL_ARGS[name]!, maxChars: value });
+        const label = `${name} maxChars=${value}`;
+        assert.equal(reply.isError, true, label);
+        assert.ok(reply.content[0]!.text.startsWith("Input validation error:"), label);
+        assert.equal(reply.structuredContent, undefined, label);
+      }
+    }
+  } finally {
+    await session.close();
+  }
+});
+
+test("keepLinks is a schema violation on tools that return no page body", async () => {
+  const session = await open();
+  try {
+    for (const name of ["web_search", "web_map"]) {
+      const reply = await call(session, name, { ...MINIMAL_ARGS[name]!, keepLinks: true });
+      const label = `${name} keepLinks=true`;
+      assert.equal(reply.isError, true, label);
+      assert.ok(reply.content[0]!.text.startsWith("Input validation error:"), label);
+      assert.equal(reply.structuredContent, undefined, label);
+    }
+  } finally {
+    await session.close();
+  }
+});
+
+test("a raised maxChars and keepLinks pass validation and reach the tool", async () => {
+  const session = await open();
+  try {
+    for (const name of ["web_scrape", "web_batch_scrape", "web_crawl", "web_map", "web_extract"]) {
+      const args: Record<string, unknown> = { ...MINIMAL_ARGS[name]!, maxChars: 500000 };
+      if (name !== "web_map") args["keepLinks"] = true;
+      const reply = await call(session, name, args);
+      assert.ok(!reply.content[0]!.text.startsWith("Input validation error:"), name);
+      assert.ok(reply.structuredContent !== undefined, `${name} returned no structuredContent`);
+    }
+  } finally {
+    await session.close();
+  }
+});

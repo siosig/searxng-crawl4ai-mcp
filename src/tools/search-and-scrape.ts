@@ -61,7 +61,7 @@ export function registerSearchAndScrapeTool(server: McpServer): void {
         const { allowed, refused } = await partitionByEgress(urls);
 
         const fetched =
-          allowed.length > 0 ? await fetchSlots().run(() => crawl(allowed)) : [];
+          allowed.length > 0 ? await fetchSlots().run(() => crawl(allowed, { keepLinks: params.keepLinks })) : [];
         const byUrl = new Map(fetched.map((d) => [d.url, d]));
 
         const documents: FetchedDocument[] = urls.map((url) => {
@@ -85,7 +85,7 @@ export function registerSearchAndScrapeTool(server: McpServer): void {
         recordSearch(result.results.length, result.unresponsiveEngines);
         countDocuments(documents);
 
-        return reply({ search: result, documents }, SEARCH_AND_SCRAPE_STEPS);
+        return reply({ search: result, documents }, SEARCH_AND_SCRAPE_STEPS, params.maxChars);
       }),
   );
 }

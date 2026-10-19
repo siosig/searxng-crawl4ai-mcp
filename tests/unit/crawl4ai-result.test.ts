@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
-import { crawl, documentsFor, toDocument } from "../../src/upstream/crawl4ai.js";
+import { crawl, crawlerConfig, documentsFor, toDocument } from "../../src/upstream/crawl4ai.js";
 import { LOGIN_MARKER_FILE, SESSION_ROOT_FILE } from "../../src/upstream/login-session.js";
 import { setEnvForTest, type Env } from "../../src/utils/env.js";
 import { UpstreamError } from "../../src/utils/errors.js";
@@ -248,4 +248,32 @@ test("a crawl during a manual login is refused before anything leaves the proces
     setEnvForTest(null);
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("a read sends the link-stripping markdown options unless links are kept", () => {
+  const options = { ignore_links: true, images_to_alt: true };
+  const pruning = { type: "PruningContentFilter", params: {} };
+  assert.deepEqual(crawlerConfig(true, false), {
+    stream: true,
+    markdown_generator: {
+      type: "DefaultMarkdownGenerator",
+      params: { content_filter: pruning, options },
+    },
+  });
+  assert.deepEqual(crawlerConfig(false, false), {
+    stream: true,
+    markdown_generator: { type: "DefaultMarkdownGenerator", params: { options } },
+  });
+  assert.deepEqual(crawlerConfig(true, true), {
+    stream: true,
+    markdown_generator: { type: "DefaultMarkdownGenerator", params: { content_filter: pruning } },
+  });
+  assert.deepEqual(crawlerConfig(false, true), { stream: true });
+});
+
+test("keeping links sends exactly the request sent before stripping existed", () => {
+  assert.equal(crawlerConfig(true, true), crawlerConfig(true, true));
+  assert.equal(crawlerConfig(false, true), crawlerConfig(false, true));
+  assert.ok(!JSON.stringify(crawlerConfig(true, true)).includes('"options"'));
+  assert.ok(!JSON.stringify(crawlerConfig(false, true)).includes('"options"'));
 });

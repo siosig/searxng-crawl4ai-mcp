@@ -1,4 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
+import { CHARACTER_LIMIT } from "../constants.js";
 import { checkEgress } from "../security/egress.js";
 import { env } from "../utils/env.js";
 import { failure, toFailure, type ToolFailure } from "../utils/errors.js";
@@ -40,12 +41,16 @@ export const ANNOTATIONS = {
  * say what to cut first. `truncated` and `truncation` are reserved for that cap
  * and are set here, so `structured` may not carry either: a tool's own field
  * under one of those names would be overwritten.
+ *
+ * `limit` is the caller's maxChars. Failures keep the default: they are small,
+ * and a schema violation never reaches a tool.
  */
 export function reply(
   structured: Record<string, unknown> & { readonly truncated?: never; readonly truncation?: never },
   steps: readonly TrimStep[] = [],
+  limit: number = CHARACTER_LIMIT,
 ): CallToolResult {
-  const { value, text } = fit(structured, steps);
+  const { value, text } = fit(structured, steps, limit);
   return {
     content: [{ type: "text", text }],
     structuredContent: value,

@@ -52,12 +52,13 @@ export function registerExtractTool(server: McpServer): void {
         // without one.
         if (env().GEMINI_API_KEY === undefined) {
           logger.info({ tool: "web_extract" }, "no model credentials; returning page content");
-          const doc = await fetchSlots().run(() => getMarkdown(params.url));
+          const doc = await fetchSlots().run(() => getMarkdown(params.url, { keepLinks: params.keepLinks }));
           if (doc.status === "failed") return replyFailure(doc.failure!);
 
           return reply(
             { url: params.url, data: null, degraded: true, markdown: doc.markdown, failure: null },
             EXTRACT_DEGRADED_STEPS,
+            params.maxChars,
           );
         }
 
@@ -65,6 +66,7 @@ export function registerExtractTool(server: McpServer): void {
         return reply(
           { url: params.url, data, degraded: false, markdown: null, failure: null },
           EXTRACT_STEPS,
+          params.maxChars,
         );
       }),
   );

@@ -105,7 +105,7 @@ export function registerCrawlTool(server: McpServer): void {
 
           for (let i = 0; i < level.length; i += BATCH) {
             const batch = level.slice(i, i + BATCH);
-            const fetched = await fetchSlots().run(() => crawl(batch));
+            const fetched = await fetchSlots().run(() => crawl(batch, { keepLinks: params.keepLinks }));
             countDocuments(fetched);
             documents.push(...fetched);
 
@@ -145,6 +145,7 @@ export function registerCrawlTool(server: McpServer): void {
             documents,
           },
           CRAWL_STEPS,
+          params.maxChars,
         );
       }),
   );
