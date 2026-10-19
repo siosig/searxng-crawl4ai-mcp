@@ -339,7 +339,7 @@ All seven tools are exposed to any LLM client that understands MCP. The HTTP tra
    GEMINI_MODEL=gemini/gemini-2.0-flash
    ```
 
-Without a key, `web_extract` degrades gracefully and returns the page as markdown. The other seven tools are unaffected and do not need LLM credentials.
+Without a key, `web_extract` degrades gracefully and returns the page as markdown. The other six tools are unaffected and do not need LLM credentials.
 
 ### Tool selection guide
 
