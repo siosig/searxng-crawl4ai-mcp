@@ -88,11 +88,22 @@ const CONTENT_VETO = `${ANTIBOT_PREFIX} Structural:`;
 
 const STREAM_CONFIG = { stream: true } as const;
 
+/**
+ * The readable read's pruning filter. The filter scores every element as if it
+ * were a block, so a short inline span - a gloss, a native-script name, the
+ * span around a single link - scores under the threshold and is cut out of the
+ * middle of a sentence that is kept. On the Wikipedia page for Tokyo this
+ * turned "(lit. 'Eastern Capital')" into "(lit. '')". A preserved tag is kept
+ * whole and not scored, so spans now go wherever their block goes; the fit
+ * markdown of that page grows by about 13%.
+ */
+const PRUNING_FILTER = { type: "PruningContentFilter", params: { preserve_tags: ["span"] } } as const;
+
 const READABLE_CONFIG = {
   stream: true,
   markdown_generator: {
     type: "DefaultMarkdownGenerator",
-    params: { content_filter: { type: "PruningContentFilter", params: {} } },
+    params: { content_filter: PRUNING_FILTER },
   },
 } as const;
 
@@ -111,8 +122,8 @@ const READABLE_CONFIG = {
 const STRIP_OPTIONS = { ignore_links: true, images_to_alt: true } as const;
 
 /**
- * The crawler_config sent with a read. With keepLinks the request is exactly
- * what it was before link stripping existed.
+ * The crawler_config sent with a read. With keepLinks the request carries no
+ * markdown options, so link targets and image sources come through as they are.
  */
 export function crawlerConfig(readable: boolean, keepLinks: boolean): Record<string, unknown> {
   if (keepLinks) return readable ? READABLE_CONFIG : STREAM_CONFIG;
@@ -121,7 +132,7 @@ export function crawlerConfig(readable: boolean, keepLinks: boolean): Record<str
     markdown_generator: {
       type: "DefaultMarkdownGenerator",
       params: readable
-        ? { content_filter: { type: "PruningContentFilter", params: {} }, options: STRIP_OPTIONS }
+        ? { content_filter: PRUNING_FILTER, options: STRIP_OPTIONS }
         : { options: STRIP_OPTIONS },
     },
   };

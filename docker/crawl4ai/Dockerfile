@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 #
-# Crawl4AI with the saved login profile (specs/006-persistent-login-sessions).
+# Crawl4AI with the saved login profile (specs/006-persistent-login-sessions),
+# plus one fix to the scraping step (text after inline tags; see below).
 #
 # The smallest change that lets the crawler use logins: Crawl4AI 0.9 refuses a
 # browser profile sent over the network, so the server itself is taught to open
@@ -24,7 +25,50 @@ RUN printf '\n%s\n%s\n%s\n' \
       'enforce_egress = _c4ai_session_profile.wrap(enforce_egress)' \
       >> /app/egress_broker.py
 
+# The scraping step removes every <style>, <link>, <meta> and <noscript> with
+# lxml's remove(), which drops the text that follows the element along with it.
+# Wikipedia puts <link> inside paragraphs, so a sentence after one went missing
+# from every read. drop_tree() keeps that text, as the same file already does
+# for empty elements (upstream #1938). Unfixed upstream through 0.9.5; when the
+# anchor stops matching the build fails, and the upstream code decides whether
+# the patch is still needed.
+RUN python - <<'EOF'
+import importlib.util, pathlib
+
+path = pathlib.Path(importlib.util.find_spec("crawl4ai.content_scraping_strategy").origin)
+src = path.read_text()
+old = (
+    '            for tag in ["style", "link", "meta", "noscript"]:\n'
+    '                for element in body.xpath(f".//{tag}"):\n'
+    '                    if element.getparent() is not None:\n'
+    '                        element.getparent().remove(element)\n'
+)
+assert src.count(old) == 1, f"tail-loss anchor not found in {path}: check whether upstream fixed it"
+path.write_text(src.replace(old, old.replace("element.getparent().remove(element)", "element.drop_tree()")))
+print("patched", path)
+EOF
+
 USER appuser
+
+# The text after each removed tag stays, and the tags themselves still go.
+RUN cd /app && python - <<'EOF'
+from crawl4ai.content_scraping_strategy import LXMLWebScrapingStrategy
+
+html = (
+    "<html><body><article>"
+    "<p>The harbour grew quickly, and as of 2020<link rel='x'> text after a link stays in the paragraph"
+    "<meta name='y'> text after a meta stays too<style>p { color: red }</style> text after a style stays"
+    "<noscript>enable scripts</noscript> text after a noscript stays as well.</p>"
+    "<p><link rel='x'>A paragraph that opens with a link element keeps its first words.</p>"
+    "</article></body></html>"
+)
+cleaned = LXMLWebScrapingStrategy().scrap("https://example.com/", html).cleaned_html
+for text in ["text after a link", "text after a meta", "text after a style", "text after a noscript", "A paragraph that opens"]:
+    assert text in cleaned, f"lost: {text!r}"
+for gone in ["color: red", "enable scripts", "<link", "<meta"]:
+    assert gone not in cleaned, f"not removed: {gone!r}"
+print("tail self-test: text after removed inline tags is kept")
+EOF
 
 # Every route shape must collapse to one canonical config, or two pooled
 # browsers would try to open the same profile.

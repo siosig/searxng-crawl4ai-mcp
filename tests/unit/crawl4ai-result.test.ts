@@ -252,7 +252,7 @@ test("a crawl during a manual login is refused before anything leaves the proces
 
 test("a read sends the link-stripping markdown options unless links are kept", () => {
   const options = { ignore_links: true, images_to_alt: true };
-  const pruning = { type: "PruningContentFilter", params: {} };
+  const pruning = { type: "PruningContentFilter", params: { preserve_tags: ["span"] } };
   assert.deepEqual(crawlerConfig(true, false), {
     stream: true,
     markdown_generator: {
@@ -271,7 +271,7 @@ test("a read sends the link-stripping markdown options unless links are kept", (
   assert.deepEqual(crawlerConfig(false, true), { stream: true });
 });
 
-test("keeping links sends exactly the request sent before stripping existed", () => {
+test("keeping links sends no markdown options", () => {
   assert.equal(crawlerConfig(true, true), crawlerConfig(true, true));
   assert.equal(crawlerConfig(false, true), crawlerConfig(false, true));
   assert.ok(!JSON.stringify(crawlerConfig(true, true)).includes('"options"'));

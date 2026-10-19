@@ -322,3 +322,22 @@ test("maxChars out of range is refused before the tool runs", async () => {
     assert.equal(Object.keys(structured).length, 0, `maxChars ${maxChars}: nothing may be structured before the tool runs`);
   }
 });
+
+// Text inline.html must keep. The first two follow an inline <link> and
+// <meta>, which Crawl4AI's scraping step used to remove along with the text
+// after them; the last two sit in short spans the readable read's pruning
+// filter used to cut out of a kept sentence.
+const INLINE_TEXTS = ["the harbour handles more cargo", "until the great fire", "Eastern Harbour", "Edo"];
+
+test("text beside inline elements survives both the readable and the plain read", async () => {
+  const url = `${FIXTURE}/inline.html`;
+  const scraped = await client.call("web_scrape", { url });
+  assert.equal(scraped.structured.status, "ok", JSON.stringify(scraped.structured.failure));
+  const batch = await client.call("web_batch_scrape", { urls: [url] });
+  const plain = (batch.structured.documents as { status: string; markdown: string }[])[0];
+  assert.ok(plain, "the document is missing");
+  assert.equal(plain.status, "ok");
+  for (const [read, markdown] of [["readable", String(scraped.structured.markdown)], ["plain", plain.markdown]]) {
+    for (const text of INLINE_TEXTS) assert.ok(markdown.includes(text), `${read} read lost: ${text}`);
+  }
+});
